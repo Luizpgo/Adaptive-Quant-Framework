@@ -1,0 +1,6 @@
+.DS_Store
+*.ex4
+*.ex5
+*.log
+experts.dat
+*.tmp
