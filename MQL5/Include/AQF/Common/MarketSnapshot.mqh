@@ -1,101 +1,118 @@
-#ifndef __MARKETSNAPSHOT_MQH__
-#define __MARKETSNAPSHOT_MQH__
+#ifndef __AQF_MARKET_SNAPSHOT_MQH__
+#define __AQF_MARKET_SNAPSHOT_MQH__
 
-class CMarketSnapshot
+//+------------------------------------------------------------------+
+//| Immutable-style market state container for one AQF update cycle  |
+//+------------------------------------------------------------------+
+class CAQFMarketSnapshot
 {
 public:
 
-   //=========================
-   // Symbol Information
-   //=========================
-
-   string Symbol;
+   //==============================================================
+   // Identity
+   //==============================================================
+   string          Symbol;
    ENUM_TIMEFRAMES Timeframe;
+   datetime        Time;
 
-   datetime Time;
-
-   //=========================
-   // Prices
-   //=========================
-
+   //==============================================================
+   // Tick
+   //==============================================================
    double Bid;
    double Ask;
    double Last;
 
-   double Spread;
+   double Point;
+   double SpreadPoints;
 
-   //=========================
-   // OHLC
-   //=========================
-
+   //==============================================================
+   // Current bar
+   //==============================================================
    double Open;
    double High;
    double Low;
    double Close;
 
-   //=========================
-   // Trend
-   //=========================
+   long TickVolume;
 
-   double EMA20;
-   double EMA50;
+   //==============================================================
+   // Indicators - populated in future versions
+   //==============================================================
+   double EMAFast;
+   double EMASlow;
    double EMA200;
 
+   double ATR;
+   double RSI;
+   double ADX;
+
+   //==============================================================
+   // Market classification - future versions
+   //==============================================================
    bool UpTrend;
    bool DownTrend;
 
-   //=========================
-   // Volatility
-   //=========================
-
-   double ATR;
-
-   //=========================
-   // Momentum
-   //=========================
-
-   double RSI;
-
-   double ADX;
-
-   //=========================
-   // Volume
-   //=========================
-
-   long TickVolume;
-
-   //=========================
-   // Trading Conditions
-   //=========================
-
    bool IsSpreadAcceptable;
-
    bool IsSessionAllowed;
-
    bool IsNewsAllowed;
-
    bool IsVolatilityAcceptable;
-
    bool IsLiquidityAcceptable;
 
-   //=========================
-   // Strategy Result
-   //=========================
+   //==============================================================
+   // Snapshot validity
+   //==============================================================
+   bool Valid;
 
-   bool BuySignal;
-
-   bool SellSignal;
-
-   //=========================
+   //==============================================================
    // Constructor
-   //=========================
-
-   CMarketSnapshot()
+   //==============================================================
+   CAQFMarketSnapshot()
    {
-      BuySignal = false;
-      SellSignal = false;
-   };
+      Reset();
+   }
 
+   //==============================================================
+   // Reset snapshot
+   //==============================================================
+   void Reset()
+   {
+      Symbol    = "";
+      Timeframe = PERIOD_CURRENT;
+      Time      = 0;
+
+      Bid  = 0.0;
+      Ask  = 0.0;
+      Last = 0.0;
+
+      Point        = 0.0;
+      SpreadPoints = 0.0;
+
+      Open  = 0.0;
+      High  = 0.0;
+      Low   = 0.0;
+      Close = 0.0;
+
+      TickVolume = 0;
+
+      EMAFast = 0.0;
+      EMASlow = 0.0;
+      EMA200  = 0.0;
+
+      ATR = 0.0;
+      RSI = 0.0;
+      ADX = 0.0;
+
+      UpTrend   = false;
+      DownTrend = false;
+
+      IsSpreadAcceptable     = false;
+      IsSessionAllowed       = false;
+      IsNewsAllowed          = false;
+      IsVolatilityAcceptable = false;
+      IsLiquidityAcceptable  = false;
+
+      Valid = false;
+   }
 };
 
 #endif

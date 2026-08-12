@@ -1,81 +1,90 @@
 //+------------------------------------------------------------------+
-//|                     Adaptive Quant Framework                     |
-//|                             AQF v0.1                             |
-//|                    Copyright (c) 2026                            |
+//|                  Adaptive Quant Framework                        |
+//|                         AQF v0.2.0                               |
+//|                                                                  |
+//|   Modular quantitative trading framework for MetaTrader 5        |
 //+------------------------------------------------------------------+
-#property copyright "AQF Project"
-#property version   "0.1"
+
+#property copyright "Adaptive Quant Framework"
+#property version   "1.000"
 #property strict
 
-//======================================================
-// Includes
-//======================================================
+#include <AQF/Core/Core.mqh>
 
-#include "../Include/Core/Core.mqh"
+//====================================================================
+// User Inputs
+//====================================================================
 
-//======================================================
-// Global Objects
-//======================================================
+input string          InpSymbol       = "";
+input ENUM_TIMEFRAMES InpTimeframe    = PERIOD_M1;
+input bool            InpDebugLogs    = true;
+input int             InpTimerSeconds = 1;
 
-CCore Core;
+//====================================================================
+// Framework
+//====================================================================
 
-//======================================================
-// Expert Initialization
-//======================================================
+CAQFCore AQFCore;
 
+//+------------------------------------------------------------------+
+//| Expert initialization                                            |
+//+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("==========================================");
-   Print(" Adaptive Quant Framework");
-   Print(" Version 0.1");
-   Print(" Initializing...");
-   Print("==========================================");
-
-   if(!Core.Initialize())
+   if(!AQFCore.Initialize(InpSymbol,
+                          InpTimeframe,
+                          InpDebugLogs,
+                          InpTimerSeconds))
    {
-      Print("Framework initialization failed.");
-      return(INIT_FAILED);
+      Print("[AQF][FATAL] Framework initialization failed.");
+
+      return INIT_FAILED;
    }
 
-   Print("Framework initialized successfully.");
+   if(!EventSetTimer(AQFCore.TimerSeconds()))
+   {
+      Print("[AQF][ERROR] Unable to initialize framework timer.");
 
-   return(INIT_SUCCEEDED);
+      AQFCore.Shutdown();
+
+      return INIT_FAILED;
+   }
+
+   return INIT_SUCCEEDED;
 }
 
-//======================================================
-// Expert Deinitialization
-//======================================================
-
+//+------------------------------------------------------------------+
+//| Expert deinitialization                                          |
+//+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Core.Shutdown();
+   EventKillTimer();
 
-   Print("AQF stopped.");
+   AQFCore.Shutdown();
+
+   Print("[AQF] Expert Advisor stopped. Reason=", reason);
 }
 
-//======================================================
-// Main Tick
-//======================================================
-
+//+------------------------------------------------------------------+
+//| Tick event                                                       |
+//+------------------------------------------------------------------+
 void OnTick()
 {
-   Core.Update();
+   AQFCore.Update();
 }
 
-//======================================================
-// Timer
-//======================================================
-
+//+------------------------------------------------------------------+
+//| Timer event                                                      |
+//+------------------------------------------------------------------+
 void OnTimer()
 {
-   Core.OnTimer();
+   AQFCore.OnTimer();
 }
 
-//======================================================
-// Trade Event
-//======================================================
-
+//+------------------------------------------------------------------+
+//| Trade event                                                      |
+//+------------------------------------------------------------------+
 void OnTrade()
 {
-   Core.OnTrade();
+   AQFCore.OnTrade();
 }

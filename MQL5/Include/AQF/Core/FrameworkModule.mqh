@@ -1,104 +1,97 @@
-#ifndef __AQF_LOGGER_MQH__
-#define __AQF_LOGGER_MQH__
+#ifndef __AQF_FRAMEWORK_MODULE_MQH__
+#define __AQF_FRAMEWORK_MODULE_MQH__
 
-#include "../Core/FrameworkModule.mqh"
+#include "../Common/ModuleStatus.mqh"
 
 //+------------------------------------------------------------------+
-//| Logging severity                                                 |
+//| Base class for AQF framework modules                             |
 //+------------------------------------------------------------------+
-enum ENUM_AQF_LOG_LEVEL
+class CAQFFrameworkModule
 {
-   AQF_LOG_INFO = 0,
-   AQF_LOG_WARNING,
-   AQF_LOG_ERROR,
-   AQF_LOG_DEBUG
-};
+protected:
 
-//+------------------------------------------------------------------+
-//| AQF Logger                                                       |
-//+------------------------------------------------------------------+
-class CAQFLogger : public CAQFFrameworkModule
-{
-private:
-
-   bool m_debugEnabled;
+   string                 m_name;
+   string                 m_version;
+   ENUM_AQF_MODULE_STATUS m_status;
 
 public:
 
    //==============================================================
    // Constructor
    //==============================================================
-   CAQFLogger()
+   CAQFFrameworkModule()
    {
-      m_name         = "Logger";
-      m_version      = "0.2.0";
-      m_debugEnabled = true;
+      m_name    = "AQF Module";
+      m_version = "0.2.0";
+      m_status  = AQF_MODULE_CREATED;
    }
 
    //==============================================================
-   // Initialize
+   // Module name
    //==============================================================
-   bool Initialize(bool debugEnabled)
+   string Name()
+   {
+      return m_name;
+   }
+
+   //==============================================================
+   // Module version
+   //==============================================================
+   string Version()
+   {
+      return m_version;
+   }
+
+   //==============================================================
+   // Current lifecycle status
+   //==============================================================
+   ENUM_AQF_MODULE_STATUS Status()
+   {
+      return m_status;
+   }
+
+   //==============================================================
+   // Human readable status
+   //==============================================================
+   string StatusText()
+   {
+      return AQFModuleStatusToString(m_status);
+   }
+
+   //==============================================================
+   // Ready check
+   //==============================================================
+   bool IsReady()
+   {
+      return (m_status == AQF_MODULE_READY ||
+              m_status == AQF_MODULE_RUNNING);
+   }
+
+   //==============================================================
+   // Base initialization
+   //==============================================================
+   virtual bool Initialize()
    {
       m_status = AQF_MODULE_INITIALIZING;
-
-      m_debugEnabled = debugEnabled;
-
       m_status = AQF_MODULE_READY;
-
-      Info("Logger initialized.");
 
       return true;
    }
 
    //==============================================================
-   // INFO
+   // Base update
    //==============================================================
-   void Info(string message)
+   virtual void Update()
    {
-      Print("[AQF][INFO] ", message);
+      if(m_status == AQF_MODULE_READY)
+         m_status = AQF_MODULE_RUNNING;
    }
 
    //==============================================================
-   // WARNING
-   //==============================================================
-   void Warning(string message)
-   {
-      Print("[AQF][WARNING] ", message);
-   }
-
-   //==============================================================
-   // ERROR
-   //==============================================================
-   void Error(string message)
-   {
-      Print("[AQF][ERROR] ", message);
-   }
-
-   //==============================================================
-   // DEBUG
-   //==============================================================
-   void Debug(string message)
-   {
-      if(m_debugEnabled)
-         Print("[AQF][DEBUG] ", message);
-   }
-
-   //==============================================================
-   // Enable / Disable debug
-   //==============================================================
-   void EnableDebug(bool enabled)
-   {
-      m_debugEnabled = enabled;
-   }
-
-   //==============================================================
-   // Shutdown
+   // Base shutdown
    //==============================================================
    virtual void Shutdown()
    {
-      Info("Logger stopped.");
-
       m_status = AQF_MODULE_STOPPED;
    }
 };
