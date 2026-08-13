@@ -1,23 +1,24 @@
 #ifndef __AQF_MARKET_SNAPSHOT_MQH__
 #define __AQF_MARKET_SNAPSHOT_MQH__
 
-//+------------------------------------------------------------------+
-//| Immutable-style market state container for one AQF update cycle  |
-//+------------------------------------------------------------------+
+#include "MarketRegime.mqh"
+
 class CAQFMarketSnapshot
 {
 public:
 
-   //==============================================================
-   // Identity
-   //==============================================================
+   //===================================================
+   // Identification
+   //===================================================
+
    string          Symbol;
    ENUM_TIMEFRAMES Timeframe;
    datetime        Time;
 
-   //==============================================================
-   // Tick
-   //==============================================================
+   //===================================================
+   // Prices
+   //===================================================
+
    double Bid;
    double Ask;
    double Last;
@@ -25,9 +26,10 @@ public:
    double Point;
    double SpreadPoints;
 
-   //==============================================================
-   // Current bar
-   //==============================================================
+   //===================================================
+   // OHLC
+   //===================================================
+
    double Open;
    double High;
    double Low;
@@ -35,9 +37,10 @@ public:
 
    long TickVolume;
 
-   //==============================================================
-   // Indicators - populated in future versions
-   //==============================================================
+   //===================================================
+   // Indicators
+   //===================================================
+
    double EMAFast;
    double EMASlow;
    double EMA200;
@@ -46,34 +49,41 @@ public:
    double RSI;
    double ADX;
 
-   //==============================================================
-   // Market classification - future versions
-   //==============================================================
-   bool UpTrend;
-   bool DownTrend;
+   //===================================================
+   // Normalized Market Metrics
+   //===================================================
 
-   bool IsSpreadAcceptable;
-   bool IsSessionAllowed;
-   bool IsNewsAllowed;
-   bool IsVolatilityAcceptable;
-   bool IsLiquidityAcceptable;
+   double ATRPercent;
+   double EMASeparationPercent;
 
-   //==============================================================
-   // Snapshot validity
-   //==============================================================
+   //===================================================
+   // Market Intelligence
+   //===================================================
+
+   ENUM_AQF_TREND_REGIME      Trend;
+   ENUM_AQF_TREND_STRENGTH    TrendStrength;
+   ENUM_AQF_VOLATILITY_REGIME Volatility;
+   ENUM_AQF_MOMENTUM_REGIME   Momentum;
+
+   //===================================================
+   // State
+   //===================================================
+
    bool Valid;
 
-   //==============================================================
+   //===================================================
    // Constructor
-   //==============================================================
+   //===================================================
+
    CAQFMarketSnapshot()
    {
       Reset();
    }
 
-   //==============================================================
-   // Reset snapshot
-   //==============================================================
+   //===================================================
+   // Reset
+   //===================================================
+
    void Reset()
    {
       Symbol    = "";
@@ -102,14 +112,13 @@ public:
       RSI = 0.0;
       ADX = 0.0;
 
-      UpTrend   = false;
-      DownTrend = false;
+      ATRPercent           = 0.0;
+      EMASeparationPercent = 0.0;
 
-      IsSpreadAcceptable     = false;
-      IsSessionAllowed       = false;
-      IsNewsAllowed          = false;
-      IsVolatilityAcceptable = false;
-      IsLiquidityAcceptable  = false;
+      Trend         = AQF_TREND_UNKNOWN;
+      TrendStrength = AQF_STRENGTH_UNKNOWN;
+      Volatility    = AQF_VOLATILITY_UNKNOWN;
+      Momentum      = AQF_MOMENTUM_UNKNOWN;
 
       Valid = false;
    }
