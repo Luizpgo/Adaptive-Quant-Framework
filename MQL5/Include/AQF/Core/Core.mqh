@@ -3,15 +3,19 @@
 
 #include "../Config/Configuration.mqh"
 #include "../Logger/Logger.mqh"
+
 #include "../Market/MarketEngine.mqh"
 #include "../Strategy/StrategyEngine.mqh"
 #include "../Strategy/SignalValidator.mqh"
+#include "../Risk/RiskManager.mqh"
 
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
 #include "../Common/StrategyType.mqh"
 #include "../Common/SignalValidation.mqh"
+#include "../Common/AccountSnapshot.mqh"
+#include "../Common/RiskDecision.mqh"
 
 //+------------------------------------------------------------------+
 //| Adaptive Quant Framework Core                                    |
@@ -22,13 +26,17 @@ private:
 
    CAQFConfiguration          m_configuration;
    CAQFLogger                 m_logger;
+
    CAQFMarketEngine           m_marketEngine;
    CAQFStrategyEngine         m_strategyEngine;
    CAQFSignalValidator        m_signalValidator;
+   CAQFRiskManager            m_riskManager;
 
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
+
    CAQFSignalValidationResult m_validation;
+   CAQFRiskDecision           m_riskDecision;
 
    bool m_initialized;
 
@@ -87,11 +95,11 @@ public:
       );
 
       m_logger.Info(
-         "Adaptive Quant Framework v0.4.0"
+         "Adaptive Quant Framework v0.5.0"
       );
 
       m_logger.Info(
-         "Signal Validation Layer"
+         "Risk Management Layer"
       );
 
       m_logger.Info(
@@ -118,7 +126,8 @@ public:
       // Strategy Engine
       //------------------------------------------------------------
 
-      if(!m_strategyEngine.Initialize(m_logger))
+      if(!m_strategyEngine.Initialize(
+            m_logger))
       {
          m_logger.Error(
             "StrategyEngine initialization failed."
@@ -128,20 +137,24 @@ public:
       }
 
       //------------------------------------------------------------
-      // Signal Validator
+      // Risk Manager
       //------------------------------------------------------------
 
-      m_signalValidator.SetMinimumConfidence(60.0);
+      if(!m_riskManager.Initialize(
+            m_logger))
+      {
+         m_logger.Error(
+            "RiskManager initialization failed."
+         );
+
+         return false;
+      }
 
       //------------------------------------------------------------
       // Complete
       //------------------------------------------------------------
 
       m_initialized = true;
-
-      m_logger.Info(
-         "SignalValidator initialized."
-      );
 
       m_logger.Info(
          "AQF INITIALIZATION SUCCESSFUL"
@@ -151,7 +164,7 @@ public:
    }
 
    //==============================================================
-   // Main Update
+   // Update
    //==============================================================
    void Update()
    {
@@ -159,7 +172,7 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Market Snapshot
+      // Market
       //------------------------------------------------------------
 
       if(!m_marketEngine.BuildSnapshot(
@@ -173,7 +186,7 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Strategy Evaluation
+      // Strategy
       //------------------------------------------------------------
 
       if(!m_strategyEngine.Evaluate(
@@ -183,32 +196,6 @@ public:
       {
          return;
       }
-
-      //------------------------------------------------------------
-      // Strategy diagnostics
-      //------------------------------------------------------------
-
-      m_logger.Debug(
-         "Signal | " +
-         m_snapshot.Symbol +
-         " | Strategy=" +
-         AQFStrategyTypeToString(
-            m_signal.Strategy) +
-         " | Direction=" +
-         AQFSignalDirectionToString(
-            m_signal.Direction) +
-         " | Confidence=" +
-         DoubleToString(
-            m_signal.Confidence,
-            1) +
-         " | Quality=" +
-         AQFSignalQualityToString(
-            m_signal.Quality) +
-         " | Valid=" +
-         (m_signal.Valid ? "YES" : "NO") +
-         " | Reason=" +
-         m_signal.Reason
-      );
 
       //------------------------------------------------------------
       // Signal Validation
@@ -226,34 +213,91 @@ public:
       }
 
       //------------------------------------------------------------
-      // Validation diagnostics
+      // Stop invalid signals before RiskManager
+      //------------------------------------------------------------
+
+      if(!m_validation.Accepted)
+      {
+         m_logger.Debug(
+            "Validation | " +
+            m_snapshot.Symbol +
+            " | Status=" +
+            AQFValidationStatusToString(
+               m_validation.Status) +
+            " | Rejection=" +
+            AQFRejectionReasonToString(
+               m_validation.RejectionReason)
+         );
+
+         return;
+      }
+
+      //------------------------------------------------------------
+      // Risk Evaluation
+      //------------------------------------------------------------
+
+     if(!m_riskManager.Evaluate(
+      m_signal,
+      m_snapshot,
+      m_riskDecision,
+      m_logger))
+      {
+         m_logger.Error(
+            "RiskManager execution failed."
+         );
+
+         return;
+      }
+
+      //------------------------------------------------------------
+      // Risk Diagnostics
       //------------------------------------------------------------
 
       m_logger.Debug(
-         "Validation | " +
-         m_snapshot.Symbol +
-         " | Status=" +
-         AQFValidationStatusToString(
-            m_validation.Status) +
-         " | Rejection=" +
-         AQFRejectionReasonToString(
-            m_validation.RejectionReason) +
-         " | Message=" +
-         m_validation.Message
-      );
+   "Risk | " +
+   m_snapshot.Symbol +
+   " | Status=" +
+   AQFRiskStatusToString(
+      m_riskDecision.Status) +
+   " | Rejection=" +
+   AQFRiskRejectionReasonToString(
+      m_riskDecision.RejectionReason) +
+   " | Risk%=" +
+   DoubleToString(
+      m_riskDecision.RiskPercent,
+      2) +
+   " | RiskMoney=" +
+   DoubleToString(
+      m_riskDecision.RiskMoney,
+      2) +
+   " | Volume=" +
+   DoubleToString(
+      m_riskDecision.NormalizedVolume,
+      2) +
+   " | Margin%=" +
+   DoubleToString(
+      m_riskDecision.EstimatedMarginPercent,
+      2) +
+   " | Notional%=" +
+   DoubleToString(
+      m_riskDecision.ProjectedNotionalPercent,
+      2) +
+   " | Message=" +
+   m_riskDecision.Message
+);
 
       //------------------------------------------------------------
       // IMPORTANT:
       //
-      // Accepted signals STOP HERE.
+      // Even AUTHORIZED trades stop here.
       //
-      // RiskManager integration will be implemented in Sprint 5.
+      // TradeEngine integration will occur later.
       //------------------------------------------------------------
 
-      if(m_validation.Accepted)
+      if(m_riskDecision.Authorized)
       {
          m_logger.Debug(
-            "Pipeline | Signal accepted and ready for RiskManager"
+            "Pipeline | Risk authorized and ready for TradeEngine"
          );
       }
    }
@@ -270,7 +314,9 @@ public:
          "Heartbeat | MarketEngine=" +
          m_marketEngine.StatusText() +
          " | StrategyEngine=" +
-         m_strategyEngine.StatusText()
+         m_strategyEngine.StatusText() +
+         " | RiskManager=" +
+         m_riskManager.StatusText()
       );
    }
 
@@ -299,6 +345,7 @@ public:
          "Stopping AQF..."
       );
 
+      m_riskManager.Shutdown();
       m_strategyEngine.Shutdown();
       m_marketEngine.Shutdown();
       m_configuration.Shutdown();
