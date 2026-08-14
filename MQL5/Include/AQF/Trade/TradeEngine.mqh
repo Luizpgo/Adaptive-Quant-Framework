@@ -7,21 +7,20 @@
 #include "../Common/TradeSignal.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/RiskDecision.mqh"
+
 #include "../Common/TradeRequest.mqh"
 #include "../Common/TradeBuildResult.mqh"
+#include "../Common/TradePreflightResult.mqh"
 
 #include "OrderBuilder.mqh"
+#include "ExecutionPreflight.mqh"
 
-//+------------------------------------------------------------------+
-//| AQF Trade Engine                                                 |
-//|                                                                  |
-//| Sprint 6 Package A: DRY RUN ONLY                                 |
-//+------------------------------------------------------------------+
 class CAQFTradeEngine : public CAQFFrameworkModule
 {
 private:
 
-   CAQFOrderBuilder m_orderBuilder;
+   CAQFOrderBuilder       m_orderBuilder;
+   CAQFExecutionPreflight m_preflight;
 
    bool m_executionEnabled;
 
@@ -30,33 +29,41 @@ public:
    CAQFTradeEngine()
    {
       m_name    = "TradeEngine";
-      m_version = "0.6.0";
+      m_version = "0.6.1";
 
       //------------------------------------------------------------
-      // HARD DISABLED.
-      //
-      // There is intentionally no execution code in Package A.
+      // Package B remains HARD DISABLED for execution.
       //------------------------------------------------------------
 
       m_executionEnabled = false;
    }
 
-   bool Initialize(CAQFLogger &logger)
+   bool Initialize(
+      CAQFLogger &logger)
    {
       m_status =
          AQF_MODULE_INITIALIZING;
 
-      m_executionEnabled = false;
+      m_executionEnabled =
+         false;
+
+      //------------------------------------------------------------
+      // Initial spread policy.
+      //------------------------------------------------------------
+
+      m_preflight.SetMaxSpreadPoints(
+         100.0
+      );
 
       m_status =
          AQF_MODULE_READY;
 
       logger.Info(
-         "TradeEngine initialized in DRY-RUN mode."
+         "TradeEngine initialized in PREFLIGHT DRY-RUN mode."
       );
 
       logger.Info(
-         "Trade execution is DISABLED."
+         "OrderCheck enabled. Trade execution remains DISABLED."
       );
 
       return true;
@@ -67,23 +74,24 @@ public:
       const CAQFMarketSnapshot &market,
       const CAQFRiskDecision &risk,
       CAQFTradeRequest &request,
-      CAQFTradeBuildResult &result,
+      CAQFTradeBuildResult &buildResult,
+      CAQFTradePreflightResult &preflightResult,
       CAQFLogger &logger)
    {
       //------------------------------------------------------------
-      // Package A has NO execution path.
+      // Build internal AQF request
       //------------------------------------------------------------
 
-      bool buildResult =
+      bool builderOk =
          m_orderBuilder.Build(
             signal,
             market,
             risk,
             request,
-            result
+            buildResult
          );
 
-      if(!buildResult)
+      if(!builderOk)
       {
          logger.Error(
             "OrderBuilder execution failed."
@@ -92,10 +100,41 @@ public:
          return false;
       }
 
-      if(result.Ready)
+      //------------------------------------------------------------
+      // Stop if builder rejected
+      //------------------------------------------------------------
+
+      if(!buildResult.Ready)
+         return true;
+
+      //------------------------------------------------------------
+      // Broker preflight
+      //------------------------------------------------------------
+
+      bool preflightOk =
+         m_preflight.Validate(
+            request,
+            preflightResult
+         );
+
+      if(!preflightOk)
       {
-         if(m_status == AQF_MODULE_READY)
-            m_status = AQF_MODULE_RUNNING;
+         logger.Error(
+            "ExecutionPreflight internal execution failed."
+         );
+
+         return false;
+      }
+
+      //------------------------------------------------------------
+      // Module only reaches RUNNING after passing preflight.
+      //------------------------------------------------------------
+
+      if(preflightResult.Passed &&
+         m_status == AQF_MODULE_READY)
+      {
+         m_status =
+            AQF_MODULE_RUNNING;
       }
 
       return true;
@@ -108,7 +147,8 @@ public:
 
    virtual void Shutdown()
    {
-      m_executionEnabled = false;
+      m_executionEnabled =
+         false;
 
       m_status =
          AQF_MODULE_STOPPED;

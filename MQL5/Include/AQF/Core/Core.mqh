@@ -25,6 +25,7 @@
 
 #include "../Common/TradeRequest.mqh"
 #include "../Common/TradeBuildResult.mqh"
+#include "../Common/TradePreflightResult.mqh"
 
 //+------------------------------------------------------------------+
 //| Adaptive Quant Framework Core                                    |
@@ -52,12 +53,13 @@ private:
 
    CAQFTradeRequest           m_tradeRequest;
    CAQFTradeBuildResult       m_tradeBuildResult;
+   CAQFTradePreflightResult   m_tradePreflightResult;
 
    bool m_initialized;
 
-   //---------------------------------------------------------------
-   // Development-only DRYRUN test
-   //---------------------------------------------------------------
+   //==============================================================
+   // Development DRY-RUN Test
+   //==============================================================
 
    bool m_dryRunTestEnabled;
    bool m_dryRunTestCompleted;
@@ -69,7 +71,7 @@ public:
    //==============================================================
    CAQFCore()
    {
-      m_initialized         = false;
+      m_initialized = false;
 
       m_dryRunTestEnabled   = false;
       m_dryRunTestCompleted = false;
@@ -131,11 +133,11 @@ public:
       );
 
       m_logger.Info(
-         "Adaptive Quant Framework v0.6.0"
+         "Adaptive Quant Framework v0.6.1"
       );
 
       m_logger.Info(
-         "Trade Execution Layer - DRY RUN"
+         "Execution Preflight Layer - DRY RUN"
       );
 
       m_logger.Info(
@@ -143,7 +145,7 @@ public:
       );
 
       //------------------------------------------------------------
-      // Market
+      // Market Engine
       //------------------------------------------------------------
 
       if(!m_marketEngine.Initialize(
@@ -159,7 +161,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Strategy
+      // Strategy Engine
       //------------------------------------------------------------
 
       if(!m_strategyEngine.Initialize(
@@ -173,7 +175,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Risk
+      // Risk Manager
       //------------------------------------------------------------
 
       if(!m_riskManager.Initialize(
@@ -201,7 +203,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Test mode diagnostics
+      // DRY-RUN Test Diagnostics
       //------------------------------------------------------------
 
       if(m_dryRunTestEnabled)
@@ -241,7 +243,7 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Market
+      // Market Snapshot
       //------------------------------------------------------------
 
       if(!m_marketEngine.BuildSnapshot(
@@ -255,7 +257,7 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Signal generation
+      // Strategy / Synthetic DRY-RUN Signal
       //------------------------------------------------------------
 
       if(m_dryRunTestEnabled &&
@@ -275,7 +277,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Signal validation
+      // Signal Validation
       //------------------------------------------------------------
 
       if(!m_signalValidator.Validate(
@@ -290,7 +292,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Validation diagnostics in test mode
+      // Test Validation Diagnostics
       //------------------------------------------------------------
 
       if(m_dryRunTestEnabled &&
@@ -308,11 +310,15 @@ public:
          );
       }
 
+      //------------------------------------------------------------
+      // Stop invalid signals
+      //------------------------------------------------------------
+
       if(!m_validation.Accepted)
          return;
 
       //------------------------------------------------------------
-      // Risk
+      // Risk Evaluation
       //------------------------------------------------------------
 
       if(!m_riskManager.Evaluate(
@@ -329,7 +335,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Risk diagnostics
+      // Risk Diagnostics
       //------------------------------------------------------------
 
       m_logger.Debug(
@@ -373,9 +379,9 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Build Trade Request
+      // Order Builder + Execution Preflight
       //
-      // DRY RUN ONLY
+      // STILL DRY-RUN ONLY
       //------------------------------------------------------------
 
       if(!m_tradeEngine.BuildDryRunRequest(
@@ -384,13 +390,14 @@ public:
             m_riskDecision,
             m_tradeRequest,
             m_tradeBuildResult,
+            m_tradePreflightResult,
             m_logger))
       {
          return;
       }
 
       //------------------------------------------------------------
-      // TradeBuild diagnostics
+      // TradeBuild Diagnostics
       //------------------------------------------------------------
 
       m_logger.Debug(
@@ -407,11 +414,54 @@ public:
       );
 
       //------------------------------------------------------------
-      // DRY RUN request
+      // Execution Preflight Diagnostics
+      //------------------------------------------------------------
+
+      m_logger.Debug(
+         "Preflight | " +
+         m_snapshot.Symbol +
+         " | Status=" +
+         AQFPreflightStatusToString(
+            m_tradePreflightResult.Status) +
+         " | Rejection=" +
+         AQFPreflightRejectionToString(
+            m_tradePreflightResult.RejectionReason) +
+         " | Filling=" +
+         AQFFillingModeToString(
+            m_tradePreflightResult.FillingMode) +
+         " | Spread=" +
+         DoubleToString(
+            m_tradePreflightResult.SpreadPoints,
+            1) +
+         " | Retcode=" +
+         IntegerToString(
+            (int)m_tradePreflightResult.CheckRetcode) +
+         " | CheckMargin=" +
+         DoubleToString(
+            m_tradePreflightResult.CheckMargin,
+            2) +
+         " | CheckFreeMargin=" +
+         DoubleToString(
+            m_tradePreflightResult.CheckFreeMargin,
+            2) +
+         " | Comment=" +
+         m_tradePreflightResult.CheckComment +
+         " | Message=" +
+         m_tradePreflightResult.Message
+      );
+
+      //------------------------------------------------------------
+      // DRY-RUN Output
+      //
+      // Requires:
+      // 1. OrderBuilder READY
+      // 2. Internal request VALID
+      // 3. Broker Preflight PASSED
       //------------------------------------------------------------
 
       if(m_tradeBuildResult.Ready &&
-         m_tradeRequest.Valid)
+         m_tradeRequest.Valid &&
+         m_tradePreflightResult.Passed)
       {
          m_logger.Debug(
             "DRYRUN | " +
@@ -441,11 +491,14 @@ public:
             " | Magic=" +
             IntegerToString(
                (int)m_tradeRequest.MagicNumber) +
+            " | Filling=" +
+            AQFFillingModeToString(
+               m_tradePreflightResult.FillingMode) +
             " | EXECUTION=DISABLED"
          );
 
          //---------------------------------------------------------
-         // Complete one-shot synthetic test.
+         // Complete one-shot synthetic test
          //---------------------------------------------------------
 
          if(m_dryRunTestEnabled)
@@ -457,7 +510,11 @@ public:
             );
 
             m_logger.Info(
-               "DRYRUN TEST COMPLETED SUCCESSFULLY"
+               "PREFLIGHT DRYRUN TEST COMPLETED SUCCESSFULLY"
+            );
+
+            m_logger.Info(
+               "ORDER CHECK PASSED"
             );
 
             m_logger.Info(
@@ -554,12 +611,9 @@ public:
 private:
 
    //==============================================================
-   // Synthetic DRYRUN Signal
+   // Synthetic DRY-RUN Signal
    //
-   // DEVELOPMENT TEST ONLY.
-   //
-   // This creates an internal TradeSignal.
-   // It does NOT create or send a broker order.
+   // DEVELOPMENT TEST ONLY
    //==============================================================
    void BuildSyntheticDryRunSignal()
    {
@@ -572,9 +626,8 @@ private:
          m_snapshot.Time;
 
       //------------------------------------------------------------
-      // Use market direction if available.
-      //
-      // If RANGE, default to BUY only for pipeline testing.
+      // Use current bearish context if available.
+      // Otherwise use BUY only to exercise the software pipeline.
       //------------------------------------------------------------
 
       if(m_snapshot.Trend ==
@@ -588,10 +641,6 @@ private:
          m_signal.Direction =
             AQF_SIGNAL_BUY;
       }
-
-      //------------------------------------------------------------
-      // Synthetic strategy metadata
-      //------------------------------------------------------------
 
       m_signal.Strategy =
          AQF_STRATEGY_TREND_FOLLOWING;
