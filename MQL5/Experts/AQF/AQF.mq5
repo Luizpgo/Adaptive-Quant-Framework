@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                  Adaptive Quant Framework                        |
-//|                         AQF v0.2.0                               |
+//|                         AQF v0.6.0                               |
 //|                                                                  |
 //|   Modular quantitative trading framework for MetaTrader 5        |
 //+------------------------------------------------------------------+
@@ -20,6 +20,18 @@ input ENUM_TIMEFRAMES InpTimeframe    = PERIOD_M1;
 input bool            InpDebugLogs    = true;
 input int             InpTimerSeconds = 1;
 
+//--------------------------------------------------------------------
+// DEVELOPMENT TEST HOOK
+//
+// false = normal AQF behavior
+// true  = inject one synthetic signal for DRY-RUN pipeline testing
+//
+// IMPORTANT:
+// This DOES NOT enable trade execution.
+//--------------------------------------------------------------------
+
+input bool            InpDryRunTest   = false;
+
 //====================================================================
 // Framework
 //====================================================================
@@ -31,19 +43,26 @@ CAQFCore AQFCore;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(!AQFCore.Initialize(InpSymbol,
-                          InpTimeframe,
-                          InpDebugLogs,
-                          InpTimerSeconds))
+   if(!AQFCore.Initialize(
+         InpSymbol,
+         InpTimeframe,
+         InpDebugLogs,
+         InpTimerSeconds,
+         InpDryRunTest))
    {
-      Print("[AQF][FATAL] Framework initialization failed.");
+      Print(
+         "[AQF][FATAL] Framework initialization failed."
+      );
 
       return INIT_FAILED;
    }
 
-   if(!EventSetTimer(AQFCore.TimerSeconds()))
+   if(!EventSetTimer(
+         AQFCore.TimerSeconds()))
    {
-      Print("[AQF][ERROR] Unable to initialize framework timer.");
+      Print(
+         "[AQF][ERROR] Unable to initialize framework timer."
+      );
 
       AQFCore.Shutdown();
 
@@ -62,7 +81,10 @@ void OnDeinit(const int reason)
 
    AQFCore.Shutdown();
 
-   Print("[AQF] Expert Advisor stopped. Reason=", reason);
+   Print(
+      "[AQF] Expert Advisor stopped. Reason=",
+      reason
+   );
 }
 
 //+------------------------------------------------------------------+
