@@ -11,9 +11,11 @@
 #include "../Common/TradeRequest.mqh"
 #include "../Common/TradeBuildResult.mqh"
 #include "../Common/TradePreflightResult.mqh"
+#include "../Common/ExecutionResult.mqh"
 
 #include "OrderBuilder.mqh"
 #include "ExecutionPreflight.mqh"
+#include "ExecutionGateway.mqh"
 
 class CAQFTradeEngine : public CAQFFrameworkModule
 {
@@ -21,21 +23,14 @@ private:
 
    CAQFOrderBuilder       m_orderBuilder;
    CAQFExecutionPreflight m_preflight;
-
-   bool m_executionEnabled;
+   CAQFExecutionGateway   m_gateway;
 
 public:
 
    CAQFTradeEngine()
    {
       m_name    = "TradeEngine";
-      m_version = "0.6.1";
-
-      //------------------------------------------------------------
-      // Package B remains HARD DISABLED for execution.
-      //------------------------------------------------------------
-
-      m_executionEnabled = false;
+      m_version = "0.6.2";
    }
 
    bool Initialize(
@@ -44,12 +39,13 @@ public:
       m_status =
          AQF_MODULE_INITIALIZING;
 
-      m_executionEnabled =
-         false;
+      //------------------------------------------------------------
+      // HARD LOCK
+      //------------------------------------------------------------
 
-      //------------------------------------------------------------
-      // Initial spread policy.
-      //------------------------------------------------------------
+      m_gateway.SetExecutionEnabled(
+         false
+      );
 
       m_preflight.SetMaxSpreadPoints(
          100.0
@@ -59,11 +55,15 @@ public:
          AQF_MODULE_READY;
 
       logger.Info(
-         "TradeEngine initialized in PREFLIGHT DRY-RUN mode."
+         "TradeEngine initialized with ExecutionGateway."
       );
 
       logger.Info(
-         "OrderCheck enabled. Trade execution remains DISABLED."
+         "Native request construction enabled."
+      );
+
+      logger.Info(
+         "TRADE EXECUTION IS PHYSICALLY DISABLED."
       );
 
       return true;
@@ -73,25 +73,25 @@ public:
       const CAQFTradeSignal &signal,
       const CAQFMarketSnapshot &market,
       const CAQFRiskDecision &risk,
+
       CAQFTradeRequest &request,
       CAQFTradeBuildResult &buildResult,
       CAQFTradePreflightResult &preflightResult,
+      CAQFExecutionResult &executionResult,
+      MqlTradeRequest &nativeRequest,
+
       CAQFLogger &logger)
    {
       //------------------------------------------------------------
-      // Build internal AQF request
+      // 1. Internal request
       //------------------------------------------------------------
 
-      bool builderOk =
-         m_orderBuilder.Build(
+      if(!m_orderBuilder.Build(
             signal,
             market,
             risk,
             request,
-            buildResult
-         );
-
-      if(!builderOk)
+            buildResult))
       {
          logger.Error(
             "OrderBuilder execution failed."
@@ -100,24 +100,16 @@ public:
          return false;
       }
 
-      //------------------------------------------------------------
-      // Stop if builder rejected
-      //------------------------------------------------------------
-
       if(!buildResult.Ready)
          return true;
 
       //------------------------------------------------------------
-      // Broker preflight
+      // 2. Broker preflight
       //------------------------------------------------------------
 
-      bool preflightOk =
-         m_preflight.Validate(
+      if(!m_preflight.Validate(
             request,
-            preflightResult
-         );
-
-      if(!preflightOk)
+            preflightResult))
       {
          logger.Error(
             "ExecutionPreflight internal execution failed."
@@ -126,11 +118,35 @@ public:
          return false;
       }
 
+      if(!preflightResult.Passed)
+         return true;
+
       //------------------------------------------------------------
-      // Module only reaches RUNNING after passing preflight.
+      // 3. Execution gateway
+      //
+      // Builds native MqlTradeRequest.
+      // Does NOT send it.
       //------------------------------------------------------------
 
-      if(preflightResult.Passed &&
+      if(!m_gateway.Prepare(
+            request,
+            preflightResult,
+            executionResult,
+            nativeRequest))
+      {
+         logger.Error(
+            "ExecutionGateway internal execution failed."
+         );
+
+         return false;
+      }
+
+      //------------------------------------------------------------
+      // The expected Package C result is BLOCKED because the
+      // native request is ready while execution remains disabled.
+      //------------------------------------------------------------
+
+      if(executionResult.Ready &&
          m_status == AQF_MODULE_READY)
       {
          m_status =
@@ -142,13 +158,15 @@ public:
 
    bool ExecutionEnabled()
    {
-      return m_executionEnabled;
+      return
+         m_gateway.ExecutionEnabled();
    }
 
    virtual void Shutdown()
    {
-      m_executionEnabled =
-         false;
+      m_gateway.SetExecutionEnabled(
+         false
+      );
 
       m_status =
          AQF_MODULE_STOPPED;

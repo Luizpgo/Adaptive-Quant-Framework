@@ -26,6 +26,7 @@
 #include "../Common/TradeRequest.mqh"
 #include "../Common/TradeBuildResult.mqh"
 #include "../Common/TradePreflightResult.mqh"
+#include "../Common/ExecutionResult.mqh"
 
 //+------------------------------------------------------------------+
 //| Adaptive Quant Framework Core                                    |
@@ -42,7 +43,6 @@ private:
    CAQFSignalValidator        m_signalValidator;
 
    CAQFRiskManager            m_riskManager;
-
    CAQFTradeEngine            m_tradeEngine;
 
    CAQFMarketSnapshot         m_snapshot;
@@ -54,6 +54,9 @@ private:
    CAQFTradeRequest           m_tradeRequest;
    CAQFTradeBuildResult       m_tradeBuildResult;
    CAQFTradePreflightResult   m_tradePreflightResult;
+
+   CAQFExecutionResult        m_executionResult;
+   MqlTradeRequest            m_nativeTradeRequest;
 
    bool m_initialized;
 
@@ -75,6 +78,8 @@ public:
 
       m_dryRunTestEnabled   = false;
       m_dryRunTestCompleted = false;
+
+      ZeroMemory(m_nativeTradeRequest);
    }
 
    //==============================================================
@@ -87,10 +92,6 @@ public:
       int timerSeconds,
       bool dryRunTestEnabled)
    {
-      //------------------------------------------------------------
-      // Test configuration
-      //------------------------------------------------------------
-
       m_dryRunTestEnabled =
          dryRunTestEnabled;
 
@@ -133,11 +134,11 @@ public:
       );
 
       m_logger.Info(
-         "Adaptive Quant Framework v0.6.1"
+         "Adaptive Quant Framework v0.6.2"
       );
 
       m_logger.Info(
-         "Execution Preflight Layer - DRY RUN"
+         "Execution Gateway - HARD LOCKED"
       );
 
       m_logger.Info(
@@ -203,27 +204,23 @@ public:
       }
 
       //------------------------------------------------------------
-      // DRY-RUN Test Diagnostics
+      // Development test warning
       //------------------------------------------------------------
 
       if(m_dryRunTestEnabled)
       {
          m_logger.Warning(
-            "DRYRUN TEST MODE ENABLED"
+            "PACKAGE C TEST MODE ENABLED"
          );
 
          m_logger.Warning(
-            "Synthetic signal injection enabled."
+            "Synthetic signal and isolated synthetic risk decision enabled."
          );
 
          m_logger.Warning(
-            "TRADE EXECUTION REMAINS DISABLED."
+            "TRADE EXECUTION REMAINS PHYSICALLY DISABLED."
          );
       }
-
-      //------------------------------------------------------------
-      // Complete
-      //------------------------------------------------------------
 
       m_initialized = true;
 
@@ -257,11 +254,20 @@ public:
          return;
 
       //------------------------------------------------------------
-      // Strategy / Synthetic DRY-RUN Signal
+      // Package C test is ONE SHOT.
       //------------------------------------------------------------
 
       if(m_dryRunTestEnabled &&
-         !m_dryRunTestCompleted)
+         m_dryRunTestCompleted)
+      {
+         return;
+      }
+
+      //------------------------------------------------------------
+      // Signal
+      //------------------------------------------------------------
+
+      if(m_dryRunTestEnabled)
       {
          BuildSyntheticDryRunSignal();
       }
@@ -291,12 +297,7 @@ public:
          return;
       }
 
-      //------------------------------------------------------------
-      // Test Validation Diagnostics
-      //------------------------------------------------------------
-
-      if(m_dryRunTestEnabled &&
-         !m_dryRunTestCompleted)
+      if(m_dryRunTestEnabled)
       {
          m_logger.Debug(
             "TEST Validation | " +
@@ -310,78 +311,111 @@ public:
          );
       }
 
-      //------------------------------------------------------------
-      // Stop invalid signals
-      //------------------------------------------------------------
-
       if(!m_validation.Accepted)
          return;
 
       //------------------------------------------------------------
-      // Risk Evaluation
+      // Risk
       //------------------------------------------------------------
 
-      if(!m_riskManager.Evaluate(
-            m_signal,
-            m_snapshot,
-            m_riskDecision,
-            m_logger))
+      if(m_dryRunTestEnabled)
       {
-         m_logger.Error(
-            "RiskManager execution failed."
+         //---------------------------------------------------------
+         // IMPORTANT:
+         //
+         // Package C test bypasses ONLY RiskManager authorization.
+         //
+         // This synthetic decision exists exclusively to exercise:
+         //
+         // OrderBuilder
+         // ExecutionPreflight
+         // OrderCheck
+         // DuplicateGuard
+         // ExecutionGateway
+         //
+         // Normal AQF operation NEVER uses this path.
+         //---------------------------------------------------------
+
+         if(!BuildSyntheticDryRunRiskDecision())
+         {
+            m_logger.Error(
+               "Unable to build synthetic Package C risk decision."
+            );
+
+            return;
+         }
+
+         m_logger.Warning(
+            "TEST RiskDecision | SYNTHETIC AUTHORIZATION | Volume=" +
+            DoubleToString(
+               m_riskDecision.NormalizedVolume,
+               2)
+         );
+      }
+      else
+      {
+         //---------------------------------------------------------
+         // REAL RiskManager
+         //---------------------------------------------------------
+
+         if(!m_riskManager.Evaluate(
+               m_signal,
+               m_snapshot,
+               m_riskDecision,
+               m_logger))
+         {
+            m_logger.Error(
+               "RiskManager execution failed."
+            );
+
+            return;
+         }
+
+         //---------------------------------------------------------
+         // Real Risk Diagnostics
+         //---------------------------------------------------------
+
+         m_logger.Debug(
+            "Risk | " +
+            m_snapshot.Symbol +
+            " | Status=" +
+            AQFRiskStatusToString(
+               m_riskDecision.Status) +
+            " | Rejection=" +
+            AQFRiskRejectionReasonToString(
+               m_riskDecision.RejectionReason) +
+            " | Risk%=" +
+            DoubleToString(
+               m_riskDecision.RiskPercent,
+               2) +
+            " | RiskMoney=" +
+            DoubleToString(
+               m_riskDecision.RiskMoney,
+               2) +
+            " | Volume=" +
+            DoubleToString(
+               m_riskDecision.NormalizedVolume,
+               2) +
+            " | Margin%=" +
+            DoubleToString(
+               m_riskDecision.EstimatedMarginPercent,
+               2) +
+            " | Notional%=" +
+            DoubleToString(
+               m_riskDecision.ProjectedNotionalPercent,
+               2) +
+            " | Message=" +
+            m_riskDecision.Message
          );
 
-         return;
+         if(!m_riskDecision.Authorized)
+            return;
       }
 
       //------------------------------------------------------------
-      // Risk Diagnostics
-      //------------------------------------------------------------
-
-      m_logger.Debug(
-         "Risk | " +
-         m_snapshot.Symbol +
-         " | Status=" +
-         AQFRiskStatusToString(
-            m_riskDecision.Status) +
-         " | Rejection=" +
-         AQFRiskRejectionReasonToString(
-            m_riskDecision.RejectionReason) +
-         " | Risk%=" +
-         DoubleToString(
-            m_riskDecision.RiskPercent,
-            2) +
-         " | RiskMoney=" +
-         DoubleToString(
-            m_riskDecision.RiskMoney,
-            2) +
-         " | Volume=" +
-         DoubleToString(
-            m_riskDecision.NormalizedVolume,
-            2) +
-         " | Margin%=" +
-         DoubleToString(
-            m_riskDecision.EstimatedMarginPercent,
-            2) +
-         " | Notional%=" +
-         DoubleToString(
-            m_riskDecision.ProjectedNotionalPercent,
-            2) +
-         " | Message=" +
-         m_riskDecision.Message
-      );
-
-      //------------------------------------------------------------
-      // Stop if RiskManager rejects
-      //------------------------------------------------------------
-
-      if(!m_riskDecision.Authorized)
-         return;
-
-      //------------------------------------------------------------
-      // Order Builder + Execution Preflight
+      // Build + Preflight + Execution Gateway
       //
-      // STILL DRY-RUN ONLY
+      // STILL NO ORDER SEND
       //------------------------------------------------------------
 
       if(!m_tradeEngine.BuildDryRunRequest(
@@ -391,13 +425,15 @@ public:
             m_tradeRequest,
             m_tradeBuildResult,
             m_tradePreflightResult,
+            m_executionResult,
+            m_nativeTradeRequest,
             m_logger))
       {
          return;
       }
 
       //------------------------------------------------------------
-      // TradeBuild Diagnostics
+      // Trade Build
       //------------------------------------------------------------
 
       m_logger.Debug(
@@ -414,7 +450,7 @@ public:
       );
 
       //------------------------------------------------------------
-      // Execution Preflight Diagnostics
+      // Preflight
       //------------------------------------------------------------
 
       m_logger.Debug(
@@ -451,17 +487,47 @@ public:
       );
 
       //------------------------------------------------------------
-      // DRY-RUN Output
-      //
-      // Requires:
-      // 1. OrderBuilder READY
-      // 2. Internal request VALID
-      // 3. Broker Preflight PASSED
+      // Execution Gateway
+      //------------------------------------------------------------
+
+      m_logger.Debug(
+         "ExecutionGateway | " +
+         m_snapshot.Symbol +
+         " | Status=" +
+         AQFExecutionStatusToString(
+            m_executionResult.Status) +
+         " | Rejection=" +
+         AQFExecutionRejectionToString(
+            m_executionResult.RejectionReason) +
+         " | Ready=" +
+         (m_executionResult.Ready
+            ? "YES"
+            : "NO") +
+         " | Sent=" +
+         (m_executionResult.Sent
+            ? "YES"
+            : "NO") +
+         " | NativeVolume=" +
+         DoubleToString(
+            m_nativeTradeRequest.volume,
+            2) +
+         " | NativePrice=" +
+         DoubleToString(
+            m_nativeTradeRequest.price,
+            _Digits) +
+         " | Message=" +
+         m_executionResult.Message
+      );
+
+      //------------------------------------------------------------
+      // DRY-RUN
       //------------------------------------------------------------
 
       if(m_tradeBuildResult.Ready &&
          m_tradeRequest.Valid &&
-         m_tradePreflightResult.Passed)
+         m_tradePreflightResult.Passed &&
+         m_executionResult.Ready &&
+         !m_executionResult.Sent)
       {
          m_logger.Debug(
             "DRYRUN | " +
@@ -498,7 +564,7 @@ public:
          );
 
          //---------------------------------------------------------
-         // Complete one-shot synthetic test
+         // Mark test complete ONLY here.
          //---------------------------------------------------------
 
          if(m_dryRunTestEnabled)
@@ -510,11 +576,23 @@ public:
             );
 
             m_logger.Info(
-               "PREFLIGHT DRYRUN TEST COMPLETED SUCCESSFULLY"
+               "PACKAGE C DRYRUN TEST COMPLETED SUCCESSFULLY"
+            );
+
+            m_logger.Info(
+               "NATIVE REQUEST BUILT"
             );
 
             m_logger.Info(
                "ORDER CHECK PASSED"
+            );
+
+            m_logger.Info(
+               "EXECUTION GATEWAY BLOCKED REQUEST"
+            );
+
+            m_logger.Info(
+               "SENT=NO"
             );
 
             m_logger.Info(
@@ -547,16 +625,16 @@ public:
          m_tradeEngine.StatusText() +
          " | Execution=" +
          (m_tradeEngine.ExecutionEnabled()
-          ? "ON"
-          : "OFF") +
+            ? "ON"
+            : "OFF") +
          " | DryRunTest=" +
          (m_dryRunTestEnabled
-          ? "ON"
-          : "OFF") +
+            ? "ON"
+            : "OFF") +
          " | TestCompleted=" +
          (m_dryRunTestCompleted
-          ? "YES"
-          : "NO")
+            ? "YES"
+            : "NO")
       );
    }
 
@@ -600,7 +678,8 @@ public:
    //==============================================================
    int TimerSeconds()
    {
-      return m_configuration.TimerSeconds();
+      return
+         m_configuration.TimerSeconds();
    }
 
    bool IsInitialized()
@@ -611,9 +690,7 @@ public:
 private:
 
    //==============================================================
-   // Synthetic DRY-RUN Signal
-   //
-   // DEVELOPMENT TEST ONLY
+   // Synthetic Signal
    //==============================================================
    void BuildSyntheticDryRunSignal()
    {
@@ -624,11 +701,6 @@ private:
 
       m_signal.Time =
          m_snapshot.Time;
-
-      //------------------------------------------------------------
-      // Use current bearish context if available.
-      // Otherwise use BUY only to exercise the software pipeline.
-      //------------------------------------------------------------
 
       if(m_snapshot.Trend ==
          AQF_TREND_DOWN)
@@ -664,10 +736,208 @@ private:
          m_snapshot.Momentum;
 
       m_signal.Reason =
-         "Synthetic DRYRUN pipeline test";
+         "Synthetic Package C pipeline test";
 
       m_signal.Valid =
          true;
+   }
+
+   //==============================================================
+   // Synthetic Risk Decision
+   //
+   // DEVELOPMENT TEST ONLY.
+   //
+   // This bypasses RiskManager ONLY when InpDryRunTest=true.
+   //==============================================================
+   bool BuildSyntheticDryRunRiskDecision()
+   {
+      m_riskDecision.Reset();
+
+      //------------------------------------------------------------
+      // Symbol contract
+      //------------------------------------------------------------
+
+      double minVolume =
+         SymbolInfoDouble(
+            m_snapshot.Symbol,
+            SYMBOL_VOLUME_MIN
+         );
+
+      double volumeStep =
+         SymbolInfoDouble(
+            m_snapshot.Symbol,
+            SYMBOL_VOLUME_STEP
+         );
+
+      double point =
+         SymbolInfoDouble(
+            m_snapshot.Symbol,
+            SYMBOL_POINT
+         );
+
+      long stopsLevelPoints =
+         SymbolInfoInteger(
+            m_snapshot.Symbol,
+            SYMBOL_TRADE_STOPS_LEVEL
+         );
+
+      if(minVolume <= 0.0 ||
+         volumeStep <= 0.0 ||
+         point <= 0.0)
+      {
+         return false;
+      }
+
+      //------------------------------------------------------------
+      // Smallest safe broker-valid test volume
+      //------------------------------------------------------------
+
+      double testVolume =
+         0.01;
+
+      if(testVolume < minVolume)
+         testVolume = minVolume;
+
+      testVolume =
+         MathCeil(
+            testVolume / volumeStep
+         ) * volumeStep;
+
+      //------------------------------------------------------------
+      // Entry
+      //------------------------------------------------------------
+
+      double entryPrice = 0.0;
+
+      if(m_signal.Direction ==
+         AQF_SIGNAL_BUY)
+      {
+         entryPrice =
+            m_snapshot.Ask;
+      }
+      else
+      {
+         entryPrice =
+            m_snapshot.Bid;
+      }
+
+      if(entryPrice <= 0.0)
+         return false;
+
+      //------------------------------------------------------------
+      // Test stop distance
+      //
+      // Use real ATR if available, while also respecting broker
+      // minimum stop distance with additional room.
+      //------------------------------------------------------------
+
+      double atrDistance =
+         m_snapshot.ATR * 2.0;
+
+      double brokerMinimumDistance =
+         (double)stopsLevelPoints *
+         point;
+
+      double stopDistance =
+         atrDistance;
+
+      double protectedMinimum =
+         brokerMinimumDistance * 2.0;
+
+      if(stopDistance <
+         protectedMinimum)
+      {
+         stopDistance =
+            protectedMinimum;
+      }
+
+      if(stopDistance <= 0.0)
+      {
+         //---------------------------------------------------------
+         // Last-resort test distance.
+         //---------------------------------------------------------
+
+         stopDistance =
+            point * 100.0;
+      }
+
+      //------------------------------------------------------------
+      // Stop Price
+      //------------------------------------------------------------
+
+      double stopPrice = 0.0;
+
+      if(m_signal.Direction ==
+         AQF_SIGNAL_BUY)
+      {
+         stopPrice =
+            entryPrice - stopDistance;
+      }
+      else
+      {
+         stopPrice =
+            entryPrice + stopDistance;
+      }
+
+      if(stopPrice <= 0.0)
+         return false;
+
+      //------------------------------------------------------------
+      // Synthetic Authorization
+      //------------------------------------------------------------
+
+      m_riskDecision.Status =
+         AQF_RISK_AUTHORIZED;
+
+      m_riskDecision.RejectionReason =
+         AQF_RISK_REJECTION_NONE;
+
+      m_riskDecision.Authorized =
+         true;
+
+      m_riskDecision.RiskPercent =
+         0.0;
+
+      m_riskDecision.RiskMoney =
+         0.0;
+
+      m_riskDecision.StopPrice =
+         stopPrice;
+
+      m_riskDecision.StopDistance =
+         stopDistance;
+
+      m_riskDecision.RequestedVolume =
+         testVolume;
+
+      m_riskDecision.NormalizedVolume =
+         testVolume;
+
+      m_riskDecision.EstimatedMargin =
+         0.0;
+
+      m_riskDecision.EstimatedMarginPercent =
+         0.0;
+
+      m_riskDecision.CurrentSymbolExposure =
+         0.0;
+
+      m_riskDecision.CurrentSymbolNotional =
+         0.0;
+
+      m_riskDecision.ProposedNotional =
+         0.0;
+
+      m_riskDecision.TotalProjectedNotional =
+         0.0;
+
+      m_riskDecision.ProjectedNotionalPercent =
+         0.0;
+
+      m_riskDecision.Message =
+         "Synthetic Package C test authorization";
+
+      return true;
    }
 };
 
