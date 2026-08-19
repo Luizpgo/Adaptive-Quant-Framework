@@ -48,6 +48,17 @@ public:
    double RequestedVolume;
    double NormalizedVolume;
 
+//------------------------------------------------------------
+// Adaptive Volume Limiter diagnostics
+//------------------------------------------------------------
+
+   double VolumeByRisk;
+   double VolumeByExposure;
+   double VolumeByMargin;
+   double VolumeByBroker;
+
+   string VolumeLimitStatus;
+
    double EstimatedMargin;
    double EstimatedMarginPercent;
 
@@ -79,6 +90,17 @@ public:
 
       RequestedVolume  = 0.0;
       NormalizedVolume = 0.0;
+
+//------------------------------------------------------------
+// Adaptive Volume Limiter diagnostics
+//------------------------------------------------------------
+
+      VolumeByRisk     = 0.0;
+      VolumeByExposure = 0.0;
+      VolumeByMargin   = 0.0;
+      VolumeByBroker   = 0.0;
+
+      VolumeLimitStatus = "";
 
       EstimatedMargin        = 0.0;
       EstimatedMarginPercent = 0.0;

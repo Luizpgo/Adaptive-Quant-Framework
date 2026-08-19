@@ -393,13 +393,31 @@ public:
                m_riskDecision.RiskMoney,
                2) +
             " | Volume=" +
-            DoubleToString(
-               m_riskDecision.NormalizedVolume,
-               2) +
-            " | Margin%=" +
-            DoubleToString(
-               m_riskDecision.EstimatedMarginPercent,
-               2) +
+DoubleToString(
+   m_riskDecision.NormalizedVolume,
+   2) +
+" | Limit=" +
+m_riskDecision.VolumeLimitStatus +
+" | VolRisk=" +
+DoubleToString(
+   m_riskDecision.VolumeByRisk,
+   2) +
+" | VolExposure=" +
+DoubleToString(
+   m_riskDecision.VolumeByExposure,
+   2) +
+" | VolMargin=" +
+DoubleToString(
+   m_riskDecision.VolumeByMargin,
+   2) +
+" | VolBroker=" +
+DoubleToString(
+   m_riskDecision.VolumeByBroker,
+   2) +
+" | Margin%=" +
+DoubleToString(
+   m_riskDecision.EstimatedMarginPercent,
+   2) +
             " | Notional%=" +
             DoubleToString(
                m_riskDecision.ProjectedNotionalPercent,

@@ -8,11 +8,13 @@
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/AccountSnapshot.mqh"
 #include "../Common/RiskDecision.mqh"
+#include "../Common/VolumeLimitResult.mqh"
 
 #include "AccountMonitor.mqh"
 #include "PositionSizer.mqh"
 #include "ExposureMonitor.mqh"
 #include "CapitalLimits.mqh"
+#include "AdaptiveVolumeLimiter.mqh"
 
 class CAQFRiskManager : public CAQFFrameworkModule
 {
@@ -22,6 +24,7 @@ private:
    CAQFPositionSizer    m_positionSizer;
    CAQFExposureMonitor  m_exposureMonitor;
    CAQFCapitalLimits    m_capitalLimits;
+   CAQFAdaptiveVolumeLimiter m_volumeLimiter;
 
    CAQFAccountSnapshot  m_accountSnapshot;
 
@@ -49,6 +52,14 @@ public:
       m_capitalLimits.SetMaxRiskPercentPerTrade(0.50);
       m_capitalLimits.SetMaxMarginUsePercent(20.0);
       m_capitalLimits.SetMaxSymbolExposurePercent(150.0);
+
+      m_volumeLimiter.SetMaxNotionalPercent(
+      m_capitalLimits.MaxSymbolExposurePercent()
+   );
+
+      m_volumeLimiter.SetMaxMarginPercent(
+      m_capitalLimits.MaxMarginUsePercent()
+   );
    }
 
    bool Initialize(CAQFLogger &logger)
@@ -274,6 +285,64 @@ public:
 
       decision.NormalizedVolume =
          normalizedVolume;
+
+//------------------------------------------------------------
+// Adaptive Volume Limiting
+//------------------------------------------------------------
+
+CAQFVolumeLimitResult volumeLimit;
+
+if(!m_volumeLimiter.Calculate(
+      signal.Symbol,
+      orderType,
+      entryPrice,
+      m_accountSnapshot.Equity,
+      m_accountSnapshot.FreeMargin,
+      normalizedVolume,
+      volumeLimit))
+{
+   Reject(
+      decision,
+      AQF_RISK_REJECTION_POSITION_SIZING,
+      "Adaptive volume limiter execution failed"
+   );
+
+   return true;
+}
+
+if(!volumeLimit.Valid)
+{
+   Reject(
+      decision,
+      AQF_RISK_REJECTION_POSITION_SIZING,
+      volumeLimit.Message
+   );
+
+   return true;
+}
+
+decision.VolumeByRisk =
+   volumeLimit.VolumeByRisk;
+
+decision.VolumeByExposure =
+   volumeLimit.VolumeByExposure;
+
+decision.VolumeByMargin =
+   volumeLimit.VolumeByMargin;
+
+decision.VolumeByBroker =
+   volumeLimit.VolumeByBroker;
+
+decision.VolumeLimitStatus =
+   AQFVolumeLimitStatusToString(
+      volumeLimit.Status
+   );
+
+decision.NormalizedVolume =
+   volumeLimit.FinalVolume;
+
+normalizedVolume =
+   volumeLimit.FinalVolume;
 
       //------------------------------------------------------------
       // Risk budget guard
