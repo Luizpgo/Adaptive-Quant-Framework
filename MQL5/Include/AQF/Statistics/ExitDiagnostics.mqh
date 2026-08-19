@@ -5,6 +5,7 @@
 #include "../Common/TradeSignal.mqh"
 #include "../Logger/Logger.mqh"
 #include "RawEntryDiagnostics.mqh"
+#include "InteractionDiagnostics.mqh"
 #define AQF_EXIT_TARGET_COUNT 6
 #define AQF_DIRECTION_BUCKETS 2
 #define AQF_QUALITY_BUCKETS 3
@@ -53,7 +54,7 @@ struct SAQFVirtualExitTrade
 //+------------------------------------------------------------------+
 //| Exit / Take-Profit Diagnostics                                   |
 //|                                                                  |
-//| Sprint 7 B5:                                                     |
+//| Sprint 7 B6:                                                     |
 //| Preserves categorized entry context from B4 and adds raw ADX,     |
 //| RSI, ATR%, EMA separation%, and momentum-alignment diagnostics.   |
 //|                                                                  |
@@ -162,6 +163,7 @@ private:
    // Sprint 7 B5 raw diagnostics
    //---------------------------------------------------------------
    CAQFRawEntryDiagnostics m_rawEntryDiagnostics;
+   CAQFInteractionDiagnostics m_interactionDiagnostics;
 
    //---------------------------------------------------------------
    // Global diagnostics
@@ -253,11 +255,25 @@ public:
          return false;
       }
 
+      if(!m_interactionDiagnostics.Initialize(
+            logger))
+      {
+         logger.Error(
+            "InteractionDiagnostics initialization failed."
+         );
+         return false;
+      }
+
       for(int i = 0;
           i < AQF_EXIT_TARGET_COUNT;
           i++)
       {
          m_rawEntryDiagnostics.SetTargetR(
+            i,
+            m_targetR[i]
+         );
+
+         m_interactionDiagnostics.SetTargetR(
             i,
             m_targetR[i]
          );
@@ -835,6 +851,13 @@ public:
          logger
       );
 
+      //------------------------------------------------------------
+      // Sprint 7 B6 interaction attribution fourth
+      //------------------------------------------------------------
+      m_interactionDiagnostics.ReportAll(
+         logger
+      );
+
       m_initialized =
          false;
    }
@@ -1069,6 +1092,16 @@ private:
          trade.EMASeparationPercent,
          true
       );
+
+      m_interactionDiagnostics.Record(
+         trade.TargetIndex,
+         trade.Direction,
+         trade.ADX,
+         trade.RSI,
+         trade.ATRPercent,
+         true
+      );
+
       logger.Debug(
          "ExitResult | " +
          trade.Symbol +
@@ -1145,6 +1178,16 @@ private:
          trade.EMASeparationPercent,
          false
       );
+
+      m_interactionDiagnostics.Record(
+         trade.TargetIndex,
+         trade.Direction,
+         trade.ADX,
+         trade.RSI,
+         trade.ATRPercent,
+         false
+      );
+
       logger.Debug(
          "ExitResult | " +
          trade.Symbol +
