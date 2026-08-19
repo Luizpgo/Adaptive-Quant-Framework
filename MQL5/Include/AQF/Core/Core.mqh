@@ -507,6 +507,7 @@ if(m_tradeBuildResult.Ready &&
 {
    m_exitDiagnostics.Register(
       m_tradeRequest,
+      m_signal,
       m_logger
    );
 }

@@ -3,9 +3,17 @@
 
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/TradeRequest.mqh"
+#include "../Common/TradeSignal.mqh"
 #include "../Logger/Logger.mqh"
 
 #define AQF_EXIT_TARGET_COUNT 6
+
+#define AQF_DIRECTION_BUCKETS 2
+#define AQF_QUALITY_BUCKETS 3
+#define AQF_STRENGTH_BUCKETS 3
+#define AQF_MOMENTUM_BUCKETS 3
+#define AQF_VOLATILITY_BUCKETS 3
+#define AQF_CONFIDENCE_BUCKETS 4
 
 //+------------------------------------------------------------------+
 //| Virtual exit trade                                               |
@@ -34,15 +42,26 @@ struct SAQFVirtualExitTrade
    ENUM_TIMEFRAMES Timeframe;
 
    int TargetIndex;
+
+   //---------------------------------------------------------------
+   // Entry-quality context
+   //---------------------------------------------------------------
+
+   ENUM_AQF_SIGNAL_QUALITY    Quality;
+   double                     Confidence;
+
+   ENUM_AQF_TREND_REGIME      Trend;
+   ENUM_AQF_TREND_STRENGTH    TrendStrength;
+   ENUM_AQF_VOLATILITY_REGIME Volatility;
+   ENUM_AQF_MOMENTUM_REGIME   Momentum;
 };
 
 //+------------------------------------------------------------------+
 //| Exit / Take-Profit Diagnostics                                   |
 //|                                                                  |
-//| Compares multiple R targets using virtual trades only.            |
-//|                                                                  |
-//| Targets:                                                         |
-//| 0.50R / 0.75R / 1.00R / 1.25R / 1.50R / 2.00R                  |
+//| Sprint 7 B4:                                                     |
+//| In addition to TP diagnostics, every resolved virtual trade is   |
+//| attributed to its original entry-quality context.                |
 //|                                                                  |
 //| NO TRADE EXECUTION EXISTS IN THIS CLASS.                         |
 //+------------------------------------------------------------------+
@@ -65,18 +84,111 @@ private:
    double m_targetR[AQF_EXIT_TARGET_COUNT];
 
    //---------------------------------------------------------------
-   // Statistics
+   // Baseline statistics
    //---------------------------------------------------------------
 
    long m_created[AQF_EXIT_TARGET_COUNT];
-
    long m_wins[AQF_EXIT_TARGET_COUNT];
-
    long m_losses[AQF_EXIT_TARGET_COUNT];
-
    long m_expired[AQF_EXIT_TARGET_COUNT];
 
    double m_totalResolvedBars[AQF_EXIT_TARGET_COUNT];
+
+   //---------------------------------------------------------------
+   // Direction statistics
+   //
+   // 0 = BUY
+   // 1 = SELL
+   //---------------------------------------------------------------
+
+   long m_directionWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_DIRECTION_BUCKETS];
+
+   long m_directionLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_DIRECTION_BUCKETS];
+
+   //---------------------------------------------------------------
+   // Quality statistics
+   //
+   // 0 = LOW
+   // 1 = MEDIUM
+   // 2 = HIGH
+   //---------------------------------------------------------------
+
+   long m_qualityWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_QUALITY_BUCKETS];
+
+   long m_qualityLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_QUALITY_BUCKETS];
+
+   //---------------------------------------------------------------
+   // Strength statistics
+   //
+   // 0 = WEAK
+   // 1 = MODERATE
+   // 2 = STRONG
+   //---------------------------------------------------------------
+
+   long m_strengthWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_STRENGTH_BUCKETS];
+
+   long m_strengthLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_STRENGTH_BUCKETS];
+
+   //---------------------------------------------------------------
+   // Momentum statistics
+   //
+   // 0 = BEARISH
+   // 1 = NEUTRAL
+   // 2 = BULLISH
+   //---------------------------------------------------------------
+
+   long m_momentumWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_MOMENTUM_BUCKETS];
+
+   long m_momentumLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_MOMENTUM_BUCKETS];
+
+   //---------------------------------------------------------------
+   // Volatility statistics
+   //
+   // 0 = LOW
+   // 1 = NORMAL
+   // 2 = HIGH
+   //---------------------------------------------------------------
+
+   long m_volatilityWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_VOLATILITY_BUCKETS];
+
+   long m_volatilityLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_VOLATILITY_BUCKETS];
+
+   //---------------------------------------------------------------
+   // Confidence statistics
+   //
+   // 0 = 60-69
+   // 1 = 70-79
+   // 2 = 80-89
+   // 3 = 90-100
+   //---------------------------------------------------------------
+
+   long m_confidenceWins
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_CONFIDENCE_BUCKETS];
+
+   long m_confidenceLosses
+      [AQF_EXIT_TARGET_COUNT]
+      [AQF_CONFIDENCE_BUCKETS];
 
    //---------------------------------------------------------------
    // Global diagnostics
@@ -127,7 +239,10 @@ public:
          120;
 
       //------------------------------------------------------------
-      // Print full statistics every 25 closed virtual scenarios.
+      // Baseline ExitStats report frequency.
+      //
+      // Entry-quality detail is printed at Shutdown so that long
+      // Strategy Tester runs do not flood the Journal.
       //------------------------------------------------------------
 
       m_reportEveryClosed =
@@ -191,6 +306,10 @@ public:
       );
 
       logger.Info(
+         "Entry-quality outcome diagnostics enabled."
+      );
+
+      logger.Info(
          "ExitDiagnostics mode: VIRTUAL ONLY - NO ORDER EXECUTION"
       );
 
@@ -202,6 +321,7 @@ public:
    //==============================================================
    bool Register(
       const CAQFTradeRequest &request,
+      const CAQFTradeSignal &signal,
       CAQFLogger &logger)
    {
       if(!m_initialized)
@@ -227,10 +347,14 @@ public:
       }
 
       //------------------------------------------------------------
+      // Signal validation
+      //------------------------------------------------------------
+
+      if(!signal.Valid)
+         return false;
+
+      //------------------------------------------------------------
       // Duplicate registration key
-      //
-      // B2 already limits strategy evaluation to one per candle.
-      // This is a second defensive layer.
       //------------------------------------------------------------
 
       string registrationKey =
@@ -256,7 +380,7 @@ public:
       }
 
       //------------------------------------------------------------
-      // Verify that six free slots exist before registering.
+      // Verify that six free slots exist.
       //------------------------------------------------------------
 
       int freeSlots =
@@ -296,68 +420,84 @@ public:
             return false;
          }
 
-        m_slots[slotIndex].Active =
-   true;
+         m_slots[slotIndex].Active =
+            true;
 
-m_slots[slotIndex].Symbol =
-   request.Symbol;
+         m_slots[slotIndex].Symbol =
+            request.Symbol;
 
-m_slots[slotIndex].Direction =
-   request.Direction;
+         m_slots[slotIndex].Direction =
+            request.Direction;
 
-m_slots[slotIndex].Strategy =
-   request.Strategy;
+         m_slots[slotIndex].Strategy =
+            request.Strategy;
 
-m_slots[slotIndex].EntryPrice =
-   request.EntryPrice;
+         m_slots[slotIndex].EntryPrice =
+            request.EntryPrice;
 
-m_slots[slotIndex].StopLoss =
-   request.StopLoss;
+         m_slots[slotIndex].StopLoss =
+            request.StopLoss;
 
-m_slots[slotIndex].StopDistance =
-   request.StopDistance;
+         m_slots[slotIndex].StopDistance =
+            request.StopDistance;
 
-m_slots[slotIndex].TargetIndex =
-   targetIndex;
+         m_slots[slotIndex].TargetIndex =
+            targetIndex;
 
-m_slots[slotIndex].TargetR =
-   m_targetR[targetIndex];
+         m_slots[slotIndex].TargetR =
+            m_targetR[targetIndex];
 
-m_slots[slotIndex].EntryTime =
-   request.SignalTime;
+         m_slots[slotIndex].EntryTime =
+            request.SignalTime;
 
-//---------------------------------------------------------
-// The timeframe will be inferred from the market snapshot
-// during Update if necessary.
-//---------------------------------------------------------
+         m_slots[slotIndex].Timeframe =
+            PERIOD_CURRENT;
 
-m_slots[slotIndex].Timeframe =
-   PERIOD_CURRENT;
+         //---------------------------------------------------------
+         // Preserve original entry context
+         //---------------------------------------------------------
 
-//---------------------------------------------------------
-// Target Price
-//---------------------------------------------------------
+         m_slots[slotIndex].Quality =
+            signal.Quality;
 
-double targetDistance =
-   request.StopDistance *
-   m_slots[slotIndex].TargetR;
+         m_slots[slotIndex].Confidence =
+            signal.Confidence;
 
-if(request.Direction ==
-   AQF_SIGNAL_BUY)
-{
-   m_slots[slotIndex].TargetPrice =
-      request.EntryPrice +
-      targetDistance;
-}
-else
-{
-   m_slots[slotIndex].TargetPrice =
-      request.EntryPrice -
-      targetDistance;
-}
+         m_slots[slotIndex].Trend =
+            signal.Trend;
 
-m_created[targetIndex]++;
-         
+         m_slots[slotIndex].TrendStrength =
+            signal.TrendStrength;
+
+         m_slots[slotIndex].Volatility =
+            signal.Volatility;
+
+         m_slots[slotIndex].Momentum =
+            signal.Momentum;
+
+         //---------------------------------------------------------
+         // Target Price
+         //---------------------------------------------------------
+
+         double targetDistance =
+            request.StopDistance *
+            m_slots[slotIndex].TargetR;
+
+         if(request.Direction ==
+            AQF_SIGNAL_BUY)
+         {
+            m_slots[slotIndex].TargetPrice =
+               request.EntryPrice +
+               targetDistance;
+         }
+         else
+         {
+            m_slots[slotIndex].TargetPrice =
+               request.EntryPrice -
+               targetDistance;
+         }
+
+         m_created[targetIndex]++;
       }
 
       m_lastRegistrationKey =
@@ -369,6 +509,22 @@ m_created[targetIndex]++;
          " | Direction=" +
          AQFSignalDirectionToString(
             request.Direction) +
+         " | Quality=" +
+         AQFSignalQualityToString(
+            signal.Quality) +
+         " | Confidence=" +
+         DoubleToString(
+            signal.Confidence,
+            1) +
+         " | Strength=" +
+         AQFStrengthToString(
+            signal.TrendStrength) +
+         " | Momentum=" +
+         AQFMomentumToString(
+            signal.Momentum) +
+         " | Volatility=" +
+         AQFVolatilityToString(
+            signal.Volatility) +
          " | Entry=" +
          DoubleToString(
             request.EntryPrice,
@@ -435,13 +591,6 @@ m_created[targetIndex]++;
                market.Timeframe;
          }
 
-         //---------------------------------------------------------
-         // Closing side of market.
-         //
-         // BUY closes at Bid.
-         // SELL closes at Ask.
-         //---------------------------------------------------------
-
          double exitPrice =
             0.0;
 
@@ -451,6 +600,11 @@ m_created[targetIndex]++;
          bool stopReached =
             false;
 
+         //---------------------------------------------------------
+         // BUY closes at Bid.
+         // SELL closes at Ask.
+         //---------------------------------------------------------
+
          if(m_slots[i].Direction ==
             AQF_SIGNAL_BUY)
          {
@@ -458,12 +612,16 @@ m_created[targetIndex]++;
                market.Bid;
 
             targetReached =
-               (market.Bid >=
-                m_slots[i].TargetPrice);
+               (
+                  market.Bid >=
+                  m_slots[i].TargetPrice
+               );
 
             stopReached =
-               (market.Bid <=
-                m_slots[i].StopLoss);
+               (
+                  market.Bid <=
+                  m_slots[i].StopLoss
+               );
          }
          else
          {
@@ -471,17 +629,17 @@ m_created[targetIndex]++;
                market.Ask;
 
             targetReached =
-               (market.Ask <=
-                m_slots[i].TargetPrice);
+               (
+                  market.Ask <=
+                  m_slots[i].TargetPrice
+               );
 
             stopReached =
-               (market.Ask >=
-                m_slots[i].StopLoss);
+               (
+                  market.Ask >=
+                  m_slots[i].StopLoss
+               );
          }
-
-         //---------------------------------------------------------
-         // Bars elapsed
-         //---------------------------------------------------------
 
          int barsElapsed =
             CalculateBarsElapsed(
@@ -490,7 +648,7 @@ m_created[targetIndex]++;
             );
 
          //---------------------------------------------------------
-         // Target reached first
+         // Target reached
          //---------------------------------------------------------
 
          if(targetReached)
@@ -506,7 +664,7 @@ m_created[targetIndex]++;
          }
 
          //---------------------------------------------------------
-         // Stop reached first
+         // Stop reached
          //---------------------------------------------------------
 
          if(stopReached)
@@ -560,7 +718,7 @@ m_created[targetIndex]++;
    }
 
    //==============================================================
-   // Report All
+   // Baseline Report
    //==============================================================
    void ReportAll(
       CAQFLogger &logger)
@@ -601,6 +759,140 @@ m_created[targetIndex]++;
    }
 
    //==============================================================
+   // Entry Quality Report
+   //==============================================================
+   void ReportEntryQuality(
+      CAQFLogger &logger)
+   {
+      logger.Info(
+         "EntryStats ============================================="
+      );
+
+      for(int target = 0;
+          target < AQF_EXIT_TARGET_COUNT;
+          target++)
+      {
+         //---------------------------------------------------------
+         // Direction
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_DIRECTION_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "DIRECTION",
+               DirectionBucketText(
+                  bucket),
+               m_directionWins[target][bucket],
+               m_directionLosses[target][bucket]
+            );
+         }
+
+         //---------------------------------------------------------
+         // Signal Quality
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_QUALITY_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "QUALITY",
+               QualityBucketText(
+                  bucket),
+               m_qualityWins[target][bucket],
+               m_qualityLosses[target][bucket]
+            );
+         }
+
+         //---------------------------------------------------------
+         // Trend Strength
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_STRENGTH_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "STRENGTH",
+               StrengthBucketText(
+                  bucket),
+               m_strengthWins[target][bucket],
+               m_strengthLosses[target][bucket]
+            );
+         }
+
+         //---------------------------------------------------------
+         // Momentum
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_MOMENTUM_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "MOMENTUM",
+               MomentumBucketText(
+                  bucket),
+               m_momentumWins[target][bucket],
+               m_momentumLosses[target][bucket]
+            );
+         }
+
+         //---------------------------------------------------------
+         // Volatility
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_VOLATILITY_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "VOLATILITY",
+               VolatilityBucketText(
+                  bucket),
+               m_volatilityWins[target][bucket],
+               m_volatilityLosses[target][bucket]
+            );
+         }
+
+         //---------------------------------------------------------
+         // Confidence
+         //---------------------------------------------------------
+
+         for(int bucket = 0;
+             bucket < AQF_CONFIDENCE_BUCKETS;
+             bucket++)
+         {
+            ReportSegment(
+               logger,
+               target,
+               "CONFIDENCE",
+               ConfidenceBucketText(
+                  bucket),
+               m_confidenceWins[target][bucket],
+               m_confidenceLosses[target][bucket]
+            );
+         }
+      }
+
+      logger.Info(
+         "EntryStats ============================================="
+      );
+   }
+
+   //==============================================================
    // Shutdown
    //==============================================================
    void Shutdown(
@@ -609,7 +901,19 @@ m_created[targetIndex]++;
       if(!m_initialized)
          return;
 
+      //------------------------------------------------------------
+      // Baseline first
+      //------------------------------------------------------------
+
       ReportAll(
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Detailed entry-quality attribution second
+      //------------------------------------------------------------
+
+      ReportEntryQuality(
          logger
       );
 
@@ -624,24 +928,90 @@ private:
    //==============================================================
    void ResetStatistics()
    {
-      for(int i = 0;
-          i < AQF_EXIT_TARGET_COUNT;
-          i++)
+      for(int target = 0;
+          target < AQF_EXIT_TARGET_COUNT;
+          target++)
       {
-         m_created[i] =
+         m_created[target] =
             0;
 
-         m_wins[i] =
+         m_wins[target] =
             0;
 
-         m_losses[i] =
+         m_losses[target] =
             0;
 
-         m_expired[i] =
+         m_expired[target] =
             0;
 
-         m_totalResolvedBars[i] =
+         m_totalResolvedBars[target] =
             0.0;
+
+         for(int bucket = 0;
+             bucket < AQF_DIRECTION_BUCKETS;
+             bucket++)
+         {
+            m_directionWins[target][bucket] =
+               0;
+
+            m_directionLosses[target][bucket] =
+               0;
+         }
+
+         for(int bucket = 0;
+             bucket < AQF_QUALITY_BUCKETS;
+             bucket++)
+         {
+            m_qualityWins[target][bucket] =
+               0;
+
+            m_qualityLosses[target][bucket] =
+               0;
+         }
+
+         for(int bucket = 0;
+             bucket < AQF_STRENGTH_BUCKETS;
+             bucket++)
+         {
+            m_strengthWins[target][bucket] =
+               0;
+
+            m_strengthLosses[target][bucket] =
+               0;
+         }
+
+         for(int bucket = 0;
+             bucket < AQF_MOMENTUM_BUCKETS;
+             bucket++)
+         {
+            m_momentumWins[target][bucket] =
+               0;
+
+            m_momentumLosses[target][bucket] =
+               0;
+         }
+
+         for(int bucket = 0;
+             bucket < AQF_VOLATILITY_BUCKETS;
+             bucket++)
+         {
+            m_volatilityWins[target][bucket] =
+               0;
+
+            m_volatilityLosses[target][bucket] =
+               0;
+         }
+
+         for(int bucket = 0;
+             bucket < AQF_CONFIDENCE_BUCKETS;
+             bucket++)
+         {
+            m_confidenceWins[target][bucket] =
+               0;
+
+            m_confidenceLosses[target][bucket] =
+               0;
+         }
       }
 
       m_totalClosed =
@@ -701,10 +1071,28 @@ private:
 
       trade.TargetIndex =
          -1;
+
+      trade.Quality =
+         AQF_SIGNAL_QUALITY_UNKNOWN;
+
+      trade.Confidence =
+         0.0;
+
+      trade.Trend =
+         AQF_TREND_UNKNOWN;
+
+      trade.TrendStrength =
+         AQF_STRENGTH_UNKNOWN;
+
+      trade.Volatility =
+         AQF_VOLATILITY_UNKNOWN;
+
+      trade.Momentum =
+         AQF_MOMENTUM_UNKNOWN;
    }
 
    //==============================================================
-   // Count Free Slots
+   // Free Slot Helpers
    //==============================================================
    int CountFreeSlots()
    {
@@ -722,9 +1110,6 @@ private:
       return freeSlots;
    }
 
-   //==============================================================
-   // Find Free Slot
-   //==============================================================
    int FindFreeSlot()
    {
       for(int i = 0;
@@ -797,8 +1182,16 @@ private:
          (double)barsElapsed;
 
       m_totalClosed++;
-
       m_totalResolved++;
+
+      //------------------------------------------------------------
+      // B4 attribution
+      //------------------------------------------------------------
+
+      RecordEntryOutcome(
+         trade,
+         true
+      );
 
       logger.Debug(
          "ExitResult | " +
@@ -808,6 +1201,16 @@ private:
             trade.TargetR,
             2) +
          "R | Result=WIN" +
+         " | Quality=" +
+         AQFSignalQualityToString(
+            trade.Quality) +
+         " | Confidence=" +
+         DoubleToString(
+            trade.Confidence,
+            1) +
+         " | Strength=" +
+         AQFStrengthToString(
+            trade.TrendStrength) +
          " | Bars=" +
          IntegerToString(
             barsElapsed) +
@@ -856,8 +1259,16 @@ private:
          (double)barsElapsed;
 
       m_totalClosed++;
-
       m_totalResolved++;
+
+      //------------------------------------------------------------
+      // B4 attribution
+      //------------------------------------------------------------
+
+      RecordEntryOutcome(
+         trade,
+         false
+      );
 
       logger.Debug(
          "ExitResult | " +
@@ -867,6 +1278,16 @@ private:
             trade.TargetR,
             2) +
          "R | Result=LOSS" +
+         " | Quality=" +
+         AQFSignalQualityToString(
+            trade.Quality) +
+         " | Confidence=" +
+         DoubleToString(
+            trade.Confidence,
+            1) +
+         " | Strength=" +
+         AQFStrengthToString(
+            trade.TrendStrength) +
          " | Bars=" +
          IntegerToString(
             barsElapsed) +
@@ -909,6 +1330,11 @@ private:
          return;
       }
 
+      //------------------------------------------------------------
+      // Expired trades are intentionally NOT classified as WIN or
+      // LOSS in EntryStats.
+      //------------------------------------------------------------
+
       m_expired[index]++;
 
       m_totalClosed++;
@@ -942,6 +1368,426 @@ private:
    }
 
    //==============================================================
+   // Entry Outcome Attribution
+   //==============================================================
+   void RecordEntryOutcome(
+      const SAQFVirtualExitTrade &trade,
+      const bool win)
+   {
+      int target =
+         trade.TargetIndex;
+
+      if(target < 0 ||
+         target >= AQF_EXIT_TARGET_COUNT)
+      {
+         return;
+      }
+
+      //------------------------------------------------------------
+      // Direction
+      //------------------------------------------------------------
+
+      int directionBucket =
+         DirectionBucket(
+            trade.Direction
+         );
+
+      if(directionBucket >= 0)
+      {
+         if(win)
+            m_directionWins[target][directionBucket]++;
+         else
+            m_directionLosses[target][directionBucket]++;
+      }
+
+      //------------------------------------------------------------
+      // Quality
+      //------------------------------------------------------------
+
+      int qualityBucket =
+         QualityBucket(
+            trade.Quality
+         );
+
+      if(qualityBucket >= 0)
+      {
+         if(win)
+            m_qualityWins[target][qualityBucket]++;
+         else
+            m_qualityLosses[target][qualityBucket]++;
+      }
+
+      //------------------------------------------------------------
+      // Strength
+      //------------------------------------------------------------
+
+      int strengthBucket =
+         StrengthBucket(
+            trade.TrendStrength
+         );
+
+      if(strengthBucket >= 0)
+      {
+         if(win)
+            m_strengthWins[target][strengthBucket]++;
+         else
+            m_strengthLosses[target][strengthBucket]++;
+      }
+
+      //------------------------------------------------------------
+      // Momentum
+      //------------------------------------------------------------
+
+      int momentumBucket =
+         MomentumBucket(
+            trade.Momentum
+         );
+
+      if(momentumBucket >= 0)
+      {
+         if(win)
+            m_momentumWins[target][momentumBucket]++;
+         else
+            m_momentumLosses[target][momentumBucket]++;
+      }
+
+      //------------------------------------------------------------
+      // Volatility
+      //------------------------------------------------------------
+
+      int volatilityBucket =
+         VolatilityBucket(
+            trade.Volatility
+         );
+
+      if(volatilityBucket >= 0)
+      {
+         if(win)
+            m_volatilityWins[target][volatilityBucket]++;
+         else
+            m_volatilityLosses[target][volatilityBucket]++;
+      }
+
+      //------------------------------------------------------------
+      // Confidence
+      //------------------------------------------------------------
+
+      int confidenceBucket =
+         ConfidenceBucket(
+            trade.Confidence
+         );
+
+      if(confidenceBucket >= 0)
+      {
+         if(win)
+            m_confidenceWins[target][confidenceBucket]++;
+         else
+            m_confidenceLosses[target][confidenceBucket]++;
+      }
+   }
+
+   //==============================================================
+   // Bucket Mapping
+   //==============================================================
+   int DirectionBucket(
+      const ENUM_AQF_SIGNAL_DIRECTION direction)
+   {
+      if(direction ==
+         AQF_SIGNAL_BUY)
+      {
+         return 0;
+      }
+
+      if(direction ==
+         AQF_SIGNAL_SELL)
+      {
+         return 1;
+      }
+
+      return -1;
+   }
+
+   int QualityBucket(
+      const ENUM_AQF_SIGNAL_QUALITY quality)
+   {
+      if(quality ==
+         AQF_SIGNAL_QUALITY_LOW)
+      {
+         return 0;
+      }
+
+      if(quality ==
+         AQF_SIGNAL_QUALITY_MEDIUM)
+      {
+         return 1;
+      }
+
+      if(quality ==
+         AQF_SIGNAL_QUALITY_HIGH)
+      {
+         return 2;
+      }
+
+      return -1;
+   }
+
+   int StrengthBucket(
+      const ENUM_AQF_TREND_STRENGTH strength)
+   {
+      if(strength ==
+         AQF_STRENGTH_WEAK)
+      {
+         return 0;
+      }
+
+      if(strength ==
+         AQF_STRENGTH_MODERATE)
+      {
+         return 1;
+      }
+
+      if(strength ==
+         AQF_STRENGTH_STRONG)
+      {
+         return 2;
+      }
+
+      return -1;
+   }
+
+   int MomentumBucket(
+      const ENUM_AQF_MOMENTUM_REGIME momentum)
+   {
+      if(momentum ==
+         AQF_MOMENTUM_BEARISH)
+      {
+         return 0;
+      }
+
+      if(momentum ==
+         AQF_MOMENTUM_NEUTRAL)
+      {
+         return 1;
+      }
+
+      if(momentum ==
+         AQF_MOMENTUM_BULLISH)
+      {
+         return 2;
+      }
+
+      return -1;
+   }
+
+   int VolatilityBucket(
+      const ENUM_AQF_VOLATILITY_REGIME volatility)
+   {
+      if(volatility ==
+         AQF_VOLATILITY_LOW)
+      {
+         return 0;
+      }
+
+      if(volatility ==
+         AQF_VOLATILITY_NORMAL)
+      {
+         return 1;
+      }
+
+      if(volatility ==
+         AQF_VOLATILITY_HIGH)
+      {
+         return 2;
+      }
+
+      return -1;
+   }
+
+   int ConfidenceBucket(
+      const double confidence)
+   {
+      if(confidence < 60.0)
+         return -1;
+
+      if(confidence < 70.0)
+         return 0;
+
+      if(confidence < 80.0)
+         return 1;
+
+      if(confidence < 90.0)
+         return 2;
+
+      return 3;
+   }
+
+   //==============================================================
+   // Bucket Text
+   //==============================================================
+   string DirectionBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "BUY";
+
+      if(bucket == 1)
+         return "SELL";
+
+      return "UNKNOWN";
+   }
+
+   string QualityBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "LOW";
+
+      if(bucket == 1)
+         return "MEDIUM";
+
+      if(bucket == 2)
+         return "HIGH";
+
+      return "UNKNOWN";
+   }
+
+   string StrengthBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "WEAK";
+
+      if(bucket == 1)
+         return "MODERATE";
+
+      if(bucket == 2)
+         return "STRONG";
+
+      return "UNKNOWN";
+   }
+
+   string MomentumBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "BEARISH";
+
+      if(bucket == 1)
+         return "NEUTRAL";
+
+      if(bucket == 2)
+         return "BULLISH";
+
+      return "UNKNOWN";
+   }
+
+   string VolatilityBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "LOW";
+
+      if(bucket == 1)
+         return "NORMAL";
+
+      if(bucket == 2)
+         return "HIGH";
+
+      return "UNKNOWN";
+   }
+
+   string ConfidenceBucketText(
+      const int bucket)
+   {
+      if(bucket == 0)
+         return "60-69";
+
+      if(bucket == 1)
+         return "70-79";
+
+      if(bucket == 2)
+         return "80-89";
+
+      if(bucket == 3)
+         return "90-100";
+
+      return "UNKNOWN";
+   }
+
+   //==============================================================
+   // Segment Reporter
+   //==============================================================
+   void ReportSegment(
+      CAQFLogger &logger,
+      const int targetIndex,
+      const string dimension,
+      const string bucket,
+      const long wins,
+      const long losses)
+   {
+      long resolved =
+         wins +
+         losses;
+
+      //------------------------------------------------------------
+      // Avoid printing empty combinations.
+      //------------------------------------------------------------
+
+      if(resolved <= 0)
+         return;
+
+      double winRate =
+         (
+            (double)wins /
+            (double)resolved
+         ) * 100.0;
+
+      double expectancyR =
+         (
+            (
+               (double)wins *
+               m_targetR[targetIndex]
+            )
+            -
+            (double)losses
+         )
+         /
+         (double)resolved;
+
+      logger.Info(
+         "EntryStats" +
+         " | Target=" +
+         DoubleToString(
+            m_targetR[targetIndex],
+            2) +
+         "R" +
+         " | Dimension=" +
+         dimension +
+         " | Bucket=" +
+         bucket +
+         " | Resolved=" +
+         IntegerToString(
+            (int)resolved) +
+         " | Wins=" +
+         IntegerToString(
+            (int)wins) +
+         " | Losses=" +
+         IntegerToString(
+            (int)losses) +
+         " | WinRate=" +
+         DoubleToString(
+            winRate,
+            2) +
+         "%" +
+         " | Expectancy=" +
+         DoubleToString(
+            expectancyR,
+            3) +
+         "R"
+      );
+   }
+
+   //==============================================================
    // Periodic Report
    //==============================================================
    void MaybeReport(
@@ -957,6 +1803,12 @@ private:
 
       m_lastReportedClosed =
          m_totalClosed;
+
+      //------------------------------------------------------------
+      // Keep periodic output concise.
+      //
+      // Detailed EntryStats will be printed at Shutdown.
+      //------------------------------------------------------------
 
       ReportAll(
          logger
@@ -1015,13 +1867,6 @@ private:
                (double)m_wins[index] /
                (double)resolved
             ) * 100.0;
-
-         //---------------------------------------------------------
-         // R expectancy:
-         //
-         // WIN  = +TargetR
-         // LOSS = -1R
-         //---------------------------------------------------------
 
          expectancyR =
             (
