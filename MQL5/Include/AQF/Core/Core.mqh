@@ -13,6 +13,8 @@
 
 #include "../Trade/TradeEngine.mqh"
 
+#include "../Statistics/ExitDiagnostics.mqh"
+
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 
@@ -44,6 +46,8 @@ private:
 
    CAQFRiskManager            m_riskManager;
    CAQFTradeEngine            m_tradeEngine;
+
+   CAQFExitDiagnostics        m_exitDiagnostics;
 
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
@@ -203,6 +207,20 @@ public:
          return false;
       }
 
+//------------------------------------------------------------
+// Exit / Take-Profit Diagnostics
+//------------------------------------------------------------
+
+if(!m_exitDiagnostics.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "ExitDiagnostics initialization failed."
+   );
+
+   return false;
+}
+
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -252,6 +270,24 @@ public:
 
       if(!m_snapshot.Valid)
          return;
+
+
+//------------------------------------------------------------
+// Exit Diagnostics
+//
+// IMPORTANT:
+//
+// StrategyEngine evaluates once per new candle.
+//
+// ExitDiagnostics evaluates active virtual exits on EVERY
+// market tick because TP or SL may be reached inside a candle.
+//------------------------------------------------------------
+
+m_exitDiagnostics.Update(
+   m_snapshot,
+   m_logger
+);
+
 
       //------------------------------------------------------------
       // Package C test is ONE SHOT.
@@ -449,6 +485,32 @@ DoubleToString(
       {
          return;
       }
+
+
+//------------------------------------------------------------
+// Exit / Take-Profit Diagnostic Registration
+//
+// Register only an executable-quality setup:
+//
+// - TradeRequest successfully built
+// - internal request valid
+// - broker preflight passed
+// - ExecutionGateway considers request ready
+//
+// Execution itself remains disabled.
+//------------------------------------------------------------
+
+if(m_tradeBuildResult.Ready &&
+   m_tradeRequest.Valid &&
+   m_tradePreflightResult.Passed &&
+   m_executionResult.Ready)
+{
+   m_exitDiagnostics.Register(
+      m_tradeRequest,
+      m_logger
+   );
+}
+
 
       //------------------------------------------------------------
       // Trade Build
@@ -680,6 +742,11 @@ DoubleToString(
       m_logger.Info(
          "Stopping AQF..."
       );
+
+
+m_exitDiagnostics.Shutdown(
+   m_logger
+);
 
       m_tradeEngine.Shutdown();
       m_riskManager.Shutdown();
