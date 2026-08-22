@@ -9,6 +9,7 @@
 #include "../Trade/TradeEngine.mqh"
 #include "../Statistics/ExitDiagnostics.mqh"
 #include "../Statistics/CandidatePolicySimulator.mqh"
+#include "../Statistics/CostCapitalSimulator.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -35,6 +36,7 @@ private:
    CAQFTradeEngine            m_tradeEngine;
    CAQFExitDiagnostics        m_exitDiagnostics;
    CAQFCandidatePolicySimulator m_candidatePolicySimulator;
+   CAQFCostCapitalSimulator     m_costCapitalSimulator;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -104,7 +106,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.8.0"
+         "Adaptive Quant Framework v0.8.2"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -180,6 +182,17 @@ if(!m_candidatePolicySimulator.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 8 Package B - Cost & Capital Simulator
+//------------------------------------------------------------
+if(!m_costCapitalSimulator.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "CostCapitalSimulator initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -239,6 +252,15 @@ m_exitDiagnostics.Update(
 // Active policy positions are evaluated on EVERY tick.
 //------------------------------------------------------------
 m_candidatePolicySimulator.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Cost & Capital Simulator
+//
+// H2 cost/capital scenarios are marked-to-market on EVERY tick.
+//------------------------------------------------------------
+m_costCapitalSimulator.Update(
    m_snapshot,
    m_logger
 );
@@ -442,6 +464,11 @@ if(m_tradeBuildResult.Ready &&
       m_logger
    );
    m_candidatePolicySimulator.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_costCapitalSimulator.Register(
       m_tradeRequest,
       m_snapshot,
       m_logger
@@ -664,6 +691,14 @@ m_exitDiagnostics.Shutdown(
 // end of long Strategy Tester runs.
 //------------------------------------------------------------
 m_candidatePolicySimulator.Shutdown(
+   m_logger
+);
+
+//------------------------------------------------------------
+// Cost/capital report is printed last so CapitalStats remain
+// easy to locate at the end of Strategy Tester runs.
+//------------------------------------------------------------
+m_costCapitalSimulator.Shutdown(
    m_logger
 );
 
