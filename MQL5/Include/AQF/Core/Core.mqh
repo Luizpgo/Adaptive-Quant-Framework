@@ -8,6 +8,7 @@
 #include "../Risk/RiskManager.mqh"
 #include "../Trade/TradeEngine.mqh"
 #include "../Statistics/ExitDiagnostics.mqh"
+#include "../Statistics/CandidatePolicySimulator.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -33,6 +34,7 @@ private:
    CAQFRiskManager            m_riskManager;
    CAQFTradeEngine            m_tradeEngine;
    CAQFExitDiagnostics        m_exitDiagnostics;
+   CAQFCandidatePolicySimulator m_candidatePolicySimulator;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -102,7 +104,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.6.2"
+         "Adaptive Quant Framework v0.8.0"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -167,6 +169,17 @@ if(!m_exitDiagnostics.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 8 Package A - Candidate Policy Simulator
+//------------------------------------------------------------
+if(!m_candidatePolicySimulator.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "CandidatePolicySimulator initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -217,6 +230,15 @@ if(!m_exitDiagnostics.Initialize(
 // market tick because TP or SL may be reached inside a candle.
 //------------------------------------------------------------
 m_exitDiagnostics.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Candidate Policy Simulator
+//
+// Active policy positions are evaluated on EVERY tick.
+//------------------------------------------------------------
+m_candidatePolicySimulator.Update(
    m_snapshot,
    m_logger
 );
@@ -416,6 +438,11 @@ if(m_tradeBuildResult.Ready &&
    m_exitDiagnostics.Register(
       m_tradeRequest,
       m_signal,
+      m_snapshot,
+      m_logger
+   );
+   m_candidatePolicySimulator.Register(
+      m_tradeRequest,
       m_snapshot,
       m_logger
    );
@@ -630,6 +657,16 @@ if(m_tradeBuildResult.Ready &&
 m_exitDiagnostics.Shutdown(
    m_logger
 );
+
+//------------------------------------------------------------
+// Candidate policy summary is deliberately printed AFTER the
+// diagnostic matrices so PolicyStats remain easy to find at the
+// end of long Strategy Tester runs.
+//------------------------------------------------------------
+m_candidatePolicySimulator.Shutdown(
+   m_logger
+);
+
       m_tradeEngine.Shutdown();
       m_riskManager.Shutdown();
       m_strategyEngine.Shutdown();
