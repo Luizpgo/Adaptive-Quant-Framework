@@ -10,6 +10,7 @@
 #include "../Statistics/ExitDiagnostics.mqh"
 #include "../Statistics/CandidatePolicySimulator.mqh"
 #include "../Statistics/CostCapitalSimulator.mqh"
+#include "../Statistics/RegimeFailureDiagnostics.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -37,6 +38,7 @@ private:
    CAQFExitDiagnostics        m_exitDiagnostics;
    CAQFCandidatePolicySimulator m_candidatePolicySimulator;
    CAQFCostCapitalSimulator     m_costCapitalSimulator;
+   CAQFRegimeFailureDiagnostics m_regimeFailureDiagnostics;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -106,7 +108,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.8.2"
+         "Adaptive Quant Framework v0.9.1"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -193,6 +195,17 @@ if(!m_costCapitalSimulator.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 9 Package A - Regime Failure Diagnostics
+//------------------------------------------------------------
+if(!m_regimeFailureDiagnostics.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "RegimeFailureDiagnostics initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -261,6 +274,16 @@ m_candidatePolicySimulator.Update(
 // H2 cost/capital scenarios are marked-to-market on EVERY tick.
 //------------------------------------------------------------
 m_costCapitalSimulator.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Regime Failure Diagnostics
+//
+// Frozen H2 research position is evaluated on EVERY tick so
+// MFE/MAE and the original TP/SL sequence remain synchronized.
+//------------------------------------------------------------
+m_regimeFailureDiagnostics.Update(
    m_snapshot,
    m_logger
 );
@@ -469,6 +492,11 @@ if(m_tradeBuildResult.Ready &&
       m_logger
    );
    m_costCapitalSimulator.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_regimeFailureDiagnostics.Register(
       m_tradeRequest,
       m_snapshot,
       m_logger
@@ -699,6 +727,14 @@ m_candidatePolicySimulator.Shutdown(
 // easy to locate at the end of Strategy Tester runs.
 //------------------------------------------------------------
 m_costCapitalSimulator.Shutdown(
+   m_logger
+);
+
+//------------------------------------------------------------
+// Regime research report is printed last so RegimeMonth and
+// RegimeBucket lines are easy to locate after long backtests.
+//------------------------------------------------------------
+m_regimeFailureDiagnostics.Shutdown(
    m_logger
 );
 
