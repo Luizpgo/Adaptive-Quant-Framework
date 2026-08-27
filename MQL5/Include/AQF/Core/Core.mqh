@@ -108,7 +108,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.9.1"
+         "Adaptive Quant Framework v0.9.2"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"

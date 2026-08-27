@@ -11,7 +11,7 @@
 //+------------------------------------------------------------------+
 //| Regime Failure Diagnostics                                       |
 //|                                                                  |
-//| Sprint 9 - Package A                                             |
+//| Sprint 9 - Package A2                                             |
 //|                                                                  |
 //| Research objective:                                              |
 //| Explain WHY frozen H2 behaves differently across periods.        |
@@ -34,7 +34,11 @@
 //| - Directional EMA fast/slow separation                           |
 //| - Directional distance from EMA200                               |
 //| - Spread as fraction of initial risk (SpreadR)                   |
-//| - Previous completed candle range / ATR                                       |
+//| - Previous completed candle range / ATR                        |
+//| - Previous completed candle tick volume                          |
+//| - Relative tick volume vs prior 20 completed candles             |
+//| - Tick-volume z-score vs prior 20 completed candles              |
+//| - Directional Efficiency Ratio over 5 / 10 / 20 completed bars   |
 //| - Hour of day                                                    |
 //| - Day of week                                                    |
 //| - MFE / MAE in R                                                 |
@@ -70,6 +74,20 @@ struct SAQFRegimePosition
    double SpreadR;
    double RangeATR;
 
+   //---------------------------------------------------------------
+   // Sprint 9A2: activity + directional persistence
+   //---------------------------------------------------------------
+
+   bool ResearchFeaturesValid;
+
+   long PrevTickVolume;
+   double RelativeVolume20;
+   double VolumeZScore20;
+
+   double DirectionalER5;
+   double DirectionalER10;
+   double DirectionalER20;
+
    int Hour;
    int DayOfWeek;
    int MonthKey;
@@ -103,6 +121,15 @@ struct SAQFRegimeStats
    double SumDirectionalEMA200DistancePercent;
    double SumSpreadR;
    double SumRangeATR;
+
+   long ResearchFeatureTrades;
+   double SumPrevTickVolume;
+   double SumRelativeVolume20;
+   double SumVolumeZScore20;
+   double SumDirectionalER5;
+   double SumDirectionalER10;
+   double SumDirectionalER20;
+
    double SumBars;
 };
 
@@ -126,6 +153,7 @@ private:
    long m_eligible;
    long m_opened;
    long m_skippedActive;
+   long m_researchFeatureCaptureFailures;
 
    //---------------------------------------------------------------
    // Overall and monthly statistics
@@ -149,6 +177,13 @@ private:
    SAQFRegimeStats m_ema200Bucket[4];
    SAQFRegimeStats m_spreadRBucket[4];
    SAQFRegimeStats m_rangeATRBucket[4];
+
+   SAQFRegimeStats m_relativeVolume20Bucket[5];
+   SAQFRegimeStats m_volumeZScore20Bucket[5];
+
+   SAQFRegimeStats m_directionalER5Bucket[4];
+   SAQFRegimeStats m_directionalER10Bucket[4];
+   SAQFRegimeStats m_directionalER20Bucket[4];
 
    SAQFRegimeStats m_hour[24];
    SAQFRegimeStats m_weekday[7];
@@ -202,11 +237,19 @@ public:
       );
 
       logger.Info(
-         "Regime diagnostics: Month | Direction | ADX | ATR% | DirRSI | DirEMA | EMA200 | SpreadR | PrevRangeATR | Hour | Weekday | MFE/MAE"
+         "Regime diagnostics A2: Month | Direction | ADX | ATR% | DirRSI | DirEMA | EMA200 | SpreadR | PrevRangeATR | RelVol20 | VolZ20 | DirER5/10/20 | Hour | Weekday | MFE/MAE"
       );
 
       logger.Info(
          "PrevRangeATR uses the previous COMPLETED candle (CopyRates shift=1); H2 signal inputs are unchanged."
+      );
+
+      logger.Info(
+         "A2 research features use COMPLETED candles only: PrevTickVolume=shift1 | RelativeVolume20/VolZ20 baseline=shifts2..21 | DirER5/10/20=shifts1..6/11/21."
+      );
+
+      logger.Info(
+         "TickVolume is an ACTIVITY proxy, not centralized exchange volume. A2 features are observational only."
       );
 
       logger.Info(
@@ -313,9 +356,38 @@ public:
          DoubleToString(
             m_position.SpreadR,
             4) +
-         " | RangeATR=" +
+         " | PrevRangeATR=" +
          DoubleToString(
             m_position.RangeATR,
+            3) +
+         " | ResearchValid=" +
+         (
+            m_position.ResearchFeaturesValid
+            ? "YES"
+            : "NO"
+         ) +
+         " | PrevVol=" +
+         IntegerToString(
+            (int)m_position.PrevTickVolume) +
+         " | RelVol20=" +
+         DoubleToString(
+            m_position.RelativeVolume20,
+            3) +
+         " | VolZ20=" +
+         DoubleToString(
+            m_position.VolumeZScore20,
+            3) +
+         " | DirER5=" +
+         DoubleToString(
+            m_position.DirectionalER5,
+            3) +
+         " | DirER10=" +
+         DoubleToString(
+            m_position.DirectionalER10,
+            3) +
+         " | DirER20=" +
+         DoubleToString(
+            m_position.DirectionalER20,
             3)
       );
 
@@ -497,6 +569,9 @@ public:
          " | SkippedActive=" +
          IntegerToString(
             (int)m_skippedActive) +
+         " | ResearchFeatureFailures=" +
+         IntegerToString(
+            (int)m_researchFeatureCaptureFailures) +
          " | Open=" +
          (
             m_position.Active
@@ -733,7 +808,7 @@ public:
       );
 
       //------------------------------------------------------------
-      // Entry candle range / ATR
+      // Previous completed candle range / ATR
       //------------------------------------------------------------
 
       ReportStats(
@@ -761,6 +836,180 @@ public:
          "RegimeBucket",
          "Dimension=PrevRangeATR | Bucket=1.50+",
          m_rangeATRBucket[3],
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Relative tick volume (previous completed candle vs prior 20)
+      //------------------------------------------------------------
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=RelVol20 | Bucket=<0.75",
+         m_relativeVolume20Bucket[0],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=RelVol20 | Bucket=0.75-0.99",
+         m_relativeVolume20Bucket[1],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=RelVol20 | Bucket=1.00-1.24",
+         m_relativeVolume20Bucket[2],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=RelVol20 | Bucket=1.25-1.49",
+         m_relativeVolume20Bucket[3],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=RelVol20 | Bucket=1.50+",
+         m_relativeVolume20Bucket[4],
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Tick-volume z-score vs prior 20 completed candles
+      //------------------------------------------------------------
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=VolZ20 | Bucket=<-1.00",
+         m_volumeZScore20Bucket[0],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=VolZ20 | Bucket=-1.00--0.25",
+         m_volumeZScore20Bucket[1],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=VolZ20 | Bucket=-0.25-0.25",
+         m_volumeZScore20Bucket[2],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=VolZ20 | Bucket=0.25-1.00",
+         m_volumeZScore20Bucket[3],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=VolZ20 | Bucket=1.00+",
+         m_volumeZScore20Bucket[4],
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Directional Efficiency Ratio: 5 completed candles
+      //------------------------------------------------------------
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER5 | Bucket=<0",
+         m_directionalER5Bucket[0],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER5 | Bucket=0.00-0.24",
+         m_directionalER5Bucket[1],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER5 | Bucket=0.25-0.49",
+         m_directionalER5Bucket[2],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER5 | Bucket=0.50+",
+         m_directionalER5Bucket[3],
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Directional Efficiency Ratio: 10 completed candles
+      //------------------------------------------------------------
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER10 | Bucket=<0",
+         m_directionalER10Bucket[0],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER10 | Bucket=0.00-0.24",
+         m_directionalER10Bucket[1],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER10 | Bucket=0.25-0.49",
+         m_directionalER10Bucket[2],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER10 | Bucket=0.50+",
+         m_directionalER10Bucket[3],
+         logger
+      );
+
+      //------------------------------------------------------------
+      // Directional Efficiency Ratio: 20 completed candles
+      //------------------------------------------------------------
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER20 | Bucket=<0",
+         m_directionalER20Bucket[0],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER20 | Bucket=0.00-0.24",
+         m_directionalER20Bucket[1],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER20 | Bucket=0.25-0.49",
+         m_directionalER20Bucket[2],
+         logger
+      );
+
+      ReportStats(
+         "RegimeBucket",
+         "Dimension=DirER20 | Bucket=0.50+",
+         m_directionalER20Bucket[3],
          logger
       );
 
@@ -994,6 +1243,17 @@ private:
          }
       }
 
+      //------------------------------------------------------------
+      // Sprint 9A2 - completed-candle activity and persistence
+      //------------------------------------------------------------
+
+      if(!CaptureResearchFeatures(
+            request,
+            market))
+      {
+         m_researchFeatureCaptureFailures++;
+      }
+
       MqlDateTime dateParts;
 
       if(TimeToStruct(
@@ -1150,6 +1410,60 @@ private:
          barsElapsed
       );
 
+      //------------------------------------------------------------
+      // Sprint 9A2 buckets are populated only when all 21 completed
+      // research bars were available. H2 tracking itself is never
+      // rejected because of missing research data.
+      //------------------------------------------------------------
+
+      if(m_position.ResearchFeaturesValid)
+      {
+         AddResult(
+            m_relativeVolume20Bucket[
+               RelativeVolume20Bucket(
+                  m_position.RelativeVolume20)],
+            win,
+            resultR,
+            barsElapsed
+         );
+
+         AddResult(
+            m_volumeZScore20Bucket[
+               VolumeZScore20Bucket(
+                  m_position.VolumeZScore20)],
+            win,
+            resultR,
+            barsElapsed
+         );
+
+         AddResult(
+            m_directionalER5Bucket[
+               DirectionalERBucket(
+                  m_position.DirectionalER5)],
+            win,
+            resultR,
+            barsElapsed
+         );
+
+         AddResult(
+            m_directionalER10Bucket[
+               DirectionalERBucket(
+                  m_position.DirectionalER10)],
+            win,
+            resultR,
+            barsElapsed
+         );
+
+         AddResult(
+            m_directionalER20Bucket[
+               DirectionalERBucket(
+                  m_position.DirectionalER20)],
+            win,
+            resultR,
+            barsElapsed
+         );
+      }
+
       if(m_position.Hour >= 0 &&
          m_position.Hour < 24)
       {
@@ -1262,6 +1576,29 @@ private:
       stats.SumRangeATR +=
          m_position.RangeATR;
 
+      if(m_position.ResearchFeaturesValid)
+      {
+         stats.ResearchFeatureTrades++;
+
+         stats.SumPrevTickVolume +=
+            (double)m_position.PrevTickVolume;
+
+         stats.SumRelativeVolume20 +=
+            m_position.RelativeVolume20;
+
+         stats.SumVolumeZScore20 +=
+            m_position.VolumeZScore20;
+
+         stats.SumDirectionalER5 +=
+            m_position.DirectionalER5;
+
+         stats.SumDirectionalER10 +=
+            m_position.DirectionalER10;
+
+         stats.SumDirectionalER20 +=
+            m_position.DirectionalER20;
+      }
+
       stats.SumBars +=
          (double)barsElapsed;
    }
@@ -1334,6 +1671,54 @@ private:
                grossLossR,
                3
             );
+      }
+
+      double avgPrevTickVolume =
+         0.0;
+
+      double avgRelativeVolume20 =
+         0.0;
+
+      double avgVolumeZScore20 =
+         0.0;
+
+      double avgDirectionalER5 =
+         0.0;
+
+      double avgDirectionalER10 =
+         0.0;
+
+      double avgDirectionalER20 =
+         0.0;
+
+      if(stats.ResearchFeatureTrades > 0)
+      {
+         double researchN =
+            (double)stats.ResearchFeatureTrades;
+
+         avgPrevTickVolume =
+            stats.SumPrevTickVolume /
+            researchN;
+
+         avgRelativeVolume20 =
+            stats.SumRelativeVolume20 /
+            researchN;
+
+         avgVolumeZScore20 =
+            stats.SumVolumeZScore20 /
+            researchN;
+
+         avgDirectionalER5 =
+            stats.SumDirectionalER5 /
+            researchN;
+
+         avgDirectionalER10 =
+            stats.SumDirectionalER10 /
+            researchN;
+
+         avgDirectionalER20 =
+            stats.SumDirectionalER20 /
+            researchN;
       }
 
       logger.Info(
@@ -1421,6 +1806,33 @@ private:
             stats.SumRangeATR /
             (double)stats.Trades,
             3) +
+         " | ResearchN=" +
+         IntegerToString(
+            (int)stats.ResearchFeatureTrades) +
+         " | AvgPrevVol=" +
+         DoubleToString(
+            avgPrevTickVolume,
+            1) +
+         " | AvgRelVol20=" +
+         DoubleToString(
+            avgRelativeVolume20,
+            3) +
+         " | AvgVolZ20=" +
+         DoubleToString(
+            avgVolumeZScore20,
+            3) +
+         " | AvgDirER5=" +
+         DoubleToString(
+            avgDirectionalER5,
+            3) +
+         " | AvgDirER10=" +
+         DoubleToString(
+            avgDirectionalER10,
+            3) +
+         " | AvgDirER20=" +
+         DoubleToString(
+            avgDirectionalER20,
+            3) +
          " | AvgBars=" +
          DoubleToString(
             stats.SumBars /
@@ -1497,6 +1909,215 @@ private:
       }
 
       return distance;
+   }
+
+   //==============================================================
+   // Sprint 9A2 research features
+   //
+   // All inputs below are known BEFORE the signal is acted on:
+   //   researchRates[0]  = shift 1  (previous completed candle)
+   //   researchRates[20] = shift 21
+   //
+   // RelativeVolume20 and VolumeZScore20 compare shift 1 against
+   // shifts 2..21, deliberately excluding the measured bar from its
+   // own baseline.
+   //
+   // Directional ER is a signed Kaufman-style efficiency ratio:
+   //
+   //   signed net displacement / total path length
+   //
+   // +1 = perfectly efficient movement in trade direction
+   //  0 = no net directional progress
+   // -1 = perfectly efficient movement against trade direction
+   //==============================================================
+   bool CaptureResearchFeatures(
+      const CAQFTradeRequest &request,
+      const CAQFMarketSnapshot &market)
+   {
+      m_position.ResearchFeaturesValid =
+         false;
+
+      m_position.PrevTickVolume =
+         0;
+
+      m_position.RelativeVolume20 =
+         0.0;
+
+      m_position.VolumeZScore20 =
+         0.0;
+
+      m_position.DirectionalER5 =
+         0.0;
+
+      m_position.DirectionalER10 =
+         0.0;
+
+      m_position.DirectionalER20 =
+         0.0;
+
+      MqlRates researchRates[];
+
+      ArraySetAsSeries(
+         researchRates,
+         true
+      );
+
+      int copied =
+         CopyRates(
+            request.Symbol,
+            market.Timeframe,
+            1,
+            21,
+            researchRates
+         );
+
+      if(copied != 21)
+         return false;
+
+      m_position.PrevTickVolume =
+         researchRates[0].tick_volume;
+
+      //------------------------------------------------------------
+      // Relative volume and z-score baseline: shifts 2..21
+      //------------------------------------------------------------
+
+      double volumeSum =
+         0.0;
+
+      for(int i = 1;
+          i <= 20;
+          i++)
+      {
+         volumeSum +=
+            (double)researchRates[i].tick_volume;
+      }
+
+      double volumeMean =
+         volumeSum /
+         20.0;
+
+      if(volumeMean > 0.0)
+      {
+         m_position.RelativeVolume20 =
+            (double)m_position.PrevTickVolume /
+            volumeMean;
+      }
+
+      double squaredDiffSum =
+         0.0;
+
+      for(int i = 1;
+          i <= 20;
+          i++)
+      {
+         double difference =
+            (double)researchRates[i].tick_volume -
+            volumeMean;
+
+         squaredDiffSum +=
+            difference *
+            difference;
+      }
+
+      double volumeStd =
+         MathSqrt(
+            squaredDiffSum /
+            20.0
+         );
+
+      if(volumeStd > 0.0)
+      {
+         m_position.VolumeZScore20 =
+            (
+               (double)m_position.PrevTickVolume -
+               volumeMean
+            )
+            /
+            volumeStd;
+      }
+
+      //------------------------------------------------------------
+      // Directional price-path efficiency
+      //------------------------------------------------------------
+
+      m_position.DirectionalER5 =
+         DirectionalEfficiency(
+            request.Direction,
+            researchRates,
+            5
+         );
+
+      m_position.DirectionalER10 =
+         DirectionalEfficiency(
+            request.Direction,
+            researchRates,
+            10
+         );
+
+      m_position.DirectionalER20 =
+         DirectionalEfficiency(
+            request.Direction,
+            researchRates,
+            20
+         );
+
+      m_position.ResearchFeaturesValid =
+         true;
+
+      return true;
+   }
+
+   double DirectionalEfficiency(
+      const ENUM_AQF_SIGNAL_DIRECTION direction,
+      const MqlRates &rates[],
+      const int window)
+   {
+      if(window <= 0 ||
+         ArraySize(rates) <
+         window + 1)
+      {
+         return 0.0;
+      }
+
+      double netDisplacement =
+         rates[0].close -
+         rates[window].close;
+
+      if(direction ==
+         AQF_SIGNAL_SELL)
+      {
+         netDisplacement =
+            -netDisplacement;
+      }
+
+      double pathLength =
+         0.0;
+
+      for(int i = 0;
+          i < window;
+          i++)
+      {
+         pathLength +=
+            MathAbs(
+               rates[i].close -
+               rates[i + 1].close
+            );
+      }
+
+      if(pathLength <= 0.0)
+         return 0.0;
+
+      double efficiency =
+         netDisplacement /
+         pathLength;
+
+      if(efficiency > 1.0)
+         efficiency = 1.0;
+
+      if(efficiency < -1.0)
+         efficiency = -1.0;
+
+      return efficiency;
    }
 
    //==============================================================
@@ -1675,6 +2296,57 @@ private:
       return 3;
    }
 
+   int RelativeVolume20Bucket(
+      const double value)
+   {
+      if(value < 0.75)
+         return 0;
+
+      if(value < 1.00)
+         return 1;
+
+      if(value < 1.25)
+         return 2;
+
+      if(value < 1.50)
+         return 3;
+
+      return 4;
+   }
+
+   int VolumeZScore20Bucket(
+      const double value)
+   {
+      if(value < -1.00)
+         return 0;
+
+      if(value < -0.25)
+         return 1;
+
+      if(value < 0.25)
+         return 2;
+
+      if(value < 1.00)
+         return 3;
+
+      return 4;
+   }
+
+   int DirectionalERBucket(
+      const double value)
+   {
+      if(value < 0.0)
+         return 0;
+
+      if(value < 0.25)
+         return 1;
+
+      if(value < 0.50)
+         return 2;
+
+      return 3;
+   }
+
    //==============================================================
    // Time helpers
    //==============================================================
@@ -1823,6 +2495,27 @@ private:
       m_position.RangeATR =
          0.0;
 
+      m_position.ResearchFeaturesValid =
+         false;
+
+      m_position.PrevTickVolume =
+         0;
+
+      m_position.RelativeVolume20 =
+         0.0;
+
+      m_position.VolumeZScore20 =
+         0.0;
+
+      m_position.DirectionalER5 =
+         0.0;
+
+      m_position.DirectionalER10 =
+         0.0;
+
+      m_position.DirectionalER20 =
+         0.0;
+
       m_position.Hour =
          -1;
 
@@ -1887,6 +2580,27 @@ private:
       stats.SumRangeATR =
          0.0;
 
+      stats.ResearchFeatureTrades =
+         0;
+
+      stats.SumPrevTickVolume =
+         0.0;
+
+      stats.SumRelativeVolume20 =
+         0.0;
+
+      stats.SumVolumeZScore20 =
+         0.0;
+
+      stats.SumDirectionalER5 =
+         0.0;
+
+      stats.SumDirectionalER10 =
+         0.0;
+
+      stats.SumDirectionalER20 =
+         0.0;
+
       stats.SumBars =
          0.0;
    }
@@ -1906,6 +2620,9 @@ private:
          0;
 
       m_skippedActive =
+         0;
+
+      m_researchFeatureCaptureFailures =
          0;
 
       ResetStats(
@@ -1968,6 +2685,31 @@ private:
 
          ResetStats(
             m_rangeATRBucket[i]
+         );
+
+         ResetStats(
+            m_directionalER5Bucket[i]
+         );
+
+         ResetStats(
+            m_directionalER10Bucket[i]
+         );
+
+         ResetStats(
+            m_directionalER20Bucket[i]
+         );
+      }
+
+      for(int i = 0;
+          i < 5;
+          i++)
+      {
+         ResetStats(
+            m_relativeVolume20Bucket[i]
+         );
+
+         ResetStats(
+            m_volumeZScore20Bucket[i]
          );
       }
 
