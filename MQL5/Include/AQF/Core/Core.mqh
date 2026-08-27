@@ -108,7 +108,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.9.2"
+         "Adaptive Quant Framework v0.9.3"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -196,7 +196,7 @@ if(!m_costCapitalSimulator.Initialize(
    return false;
 }
 //------------------------------------------------------------
-// Sprint 9 Package A - Regime Failure Diagnostics
+// Sprint 9 Package B - Regime + Frozen Candidate Interaction Diagnostics
 //------------------------------------------------------------
 if(!m_regimeFailureDiagnostics.Initialize(
       m_logger))

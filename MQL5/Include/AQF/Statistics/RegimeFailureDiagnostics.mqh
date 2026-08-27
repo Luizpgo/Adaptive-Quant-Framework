@@ -11,7 +11,7 @@
 //+------------------------------------------------------------------+
 //| Regime Failure Diagnostics                                       |
 //|                                                                  |
-//| Sprint 9 - Package A2                                             |
+//| Sprint 9 - Package B                                              |
 //|                                                                  |
 //| Research objective:                                              |
 //| Explain WHY frozen H2 behaves differently across periods.        |
@@ -39,6 +39,7 @@
 //| - Relative tick volume vs prior 20 completed candles             |
 //| - Tick-volume z-score vs prior 20 completed candles              |
 //| - Directional Efficiency Ratio over 5 / 10 / 20 completed bars   |
+//| - Frozen candidate interaction diagnostics (C1/C2/C3)             |
 //| - Hour of day                                                    |
 //| - Day of week                                                    |
 //| - MFE / MAE in R                                                 |
@@ -87,6 +88,19 @@ struct SAQFRegimePosition
    double DirectionalER5;
    double DirectionalER10;
    double DirectionalER20;
+
+   //---------------------------------------------------------------
+   // Sprint 9B: FROZEN research candidates
+   //
+   // C1 = DirER10 >= 0.50
+   // C2 = RelVol20 >= 1.50
+   // C3 = VolZ20 >= 0.25 AND VolZ20 < 1.00
+   //---------------------------------------------------------------
+
+   bool CandidateC1;
+   bool CandidateC2;
+   bool CandidateC3;
+   int InteractionMask;
 
    int Hour;
    int DayOfWeek;
@@ -185,6 +199,19 @@ private:
    SAQFRegimeStats m_directionalER10Bucket[4];
    SAQFRegimeStats m_directionalER20Bucket[4];
 
+   //---------------------------------------------------------------
+   // Sprint 9B: frozen candidate interaction research
+   //---------------------------------------------------------------
+
+   SAQFRegimeStats m_candidate[3];
+   SAQFRegimeStats m_interactionState[8];
+
+   SAQFRegimeStats m_c1OrC3;
+   SAQFRegimeStats m_c1AndC3;
+   SAQFRegimeStats m_c1AndC2;
+   SAQFRegimeStats m_c2AndC3;
+   SAQFRegimeStats m_anyCandidate;
+
    SAQFRegimeStats m_hour[24];
    SAQFRegimeStats m_weekday[7];
 
@@ -237,7 +264,7 @@ public:
       );
 
       logger.Info(
-         "Regime diagnostics A2: Month | Direction | ADX | ATR% | DirRSI | DirEMA | EMA200 | SpreadR | PrevRangeATR | RelVol20 | VolZ20 | DirER5/10/20 | Hour | Weekday | MFE/MAE"
+         "Regime diagnostics B: Month | Direction | ADX | ATR% | DirRSI | DirEMA | EMA200 | SpreadR | PrevRangeATR | RelVol20 | VolZ20 | DirER5/10/20 | CandidateInteractions | Hour | Weekday | MFE/MAE"
       );
 
       logger.Info(
@@ -250,6 +277,14 @@ public:
 
       logger.Info(
          "TickVolume is an ACTIVITY proxy, not centralized exchange volume. A2 features are observational only."
+      );
+
+      logger.Info(
+         "Sprint 9B candidates FROZEN BEFORE interaction test: C1=DirER10>=0.50 | C2=RelVol20>=1.50 | C3=VolZ20>=0.25 AND VolZ20<1.00"
+      );
+
+      logger.Info(
+         "Sprint 9B is OBSERVATIONAL: interaction states do NOT create H3 and do NOT alter H2."
       );
 
       logger.Info(
@@ -388,7 +423,28 @@ public:
          " | DirER20=" +
          DoubleToString(
             m_position.DirectionalER20,
-            3)
+            3) +
+         " | C1=" +
+         (
+            m_position.CandidateC1
+            ? "YES"
+            : "NO"
+         ) +
+         " | C2=" +
+         (
+            m_position.CandidateC2
+            ? "YES"
+            : "NO"
+         ) +
+         " | C3=" +
+         (
+            m_position.CandidateC3
+            ? "YES"
+            : "NO"
+         ) +
+         " | InteractionMask=" +
+         IntegerToString(
+            m_position.InteractionMask)
       );
 
       return true;
@@ -1014,6 +1070,127 @@ public:
       );
 
       //------------------------------------------------------------
+      // Sprint 9B - Frozen candidate interaction diagnostics
+      //
+      // Candidate definitions are FROZEN:
+      // C1 = DirER10 >= 0.50
+      // C2 = RelVol20 >= 1.50
+      // C3 = VolZ20 >= 0.25 AND VolZ20 < 1.00
+      //------------------------------------------------------------
+
+      ReportStats(
+         "InteractionCandidate",
+         "Candidate=C1_DIRER10_GE_0.50",
+         m_candidate[0],
+         logger
+      );
+
+      ReportStats(
+         "InteractionCandidate",
+         "Candidate=C2_RELVOL20_GE_1.50",
+         m_candidate[1],
+         logger
+      );
+
+      ReportStats(
+         "InteractionCandidate",
+         "Candidate=C3_VOLZ20_0.25_TO_LT_1.00",
+         m_candidate[2],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=NONE",
+         m_interactionState[0],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C1_ONLY",
+         m_interactionState[1],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C2_ONLY",
+         m_interactionState[2],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C1_C2",
+         m_interactionState[3],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C3_ONLY",
+         m_interactionState[4],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C1_C3",
+         m_interactionState[5],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C2_C3",
+         m_interactionState[6],
+         logger
+      );
+
+      ReportStats(
+         "InteractionState",
+         "State=C1_C2_C3",
+         m_interactionState[7],
+         logger
+      );
+
+      ReportStats(
+         "InteractionAggregate",
+         "Rule=C1_OR_C3",
+         m_c1OrC3,
+         logger
+      );
+
+      ReportStats(
+         "InteractionAggregate",
+         "Rule=C1_AND_C3",
+         m_c1AndC3,
+         logger
+      );
+
+      ReportStats(
+         "InteractionAggregate",
+         "Rule=C1_AND_C2",
+         m_c1AndC2,
+         logger
+      );
+
+      ReportStats(
+         "InteractionAggregate",
+         "Rule=C2_AND_C3",
+         m_c2AndC3,
+         logger
+      );
+
+      ReportStats(
+         "InteractionAggregate",
+         "Rule=ANY_C1_C2_C3",
+         m_anyCandidate,
+         logger
+      );
+
+      //------------------------------------------------------------
       // Hour
       //------------------------------------------------------------
 
@@ -1254,6 +1431,8 @@ private:
          m_researchFeatureCaptureFailures++;
       }
 
+      ClassifyFrozenCandidates();
+
       MqlDateTime dateParts;
 
       if(TimeToStruct(
@@ -1462,6 +1641,109 @@ private:
             resultR,
             barsElapsed
          );
+
+         //---------------------------------------------------------
+         // Sprint 9B frozen candidate / interaction accounting.
+         // Exactly ONE of the 8 interaction states is populated.
+         //---------------------------------------------------------
+
+         if(m_position.CandidateC1)
+         {
+            AddResult(
+               m_candidate[0],
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC2)
+         {
+            AddResult(
+               m_candidate[1],
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC3)
+         {
+            AddResult(
+               m_candidate[2],
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.InteractionMask >= 0 &&
+            m_position.InteractionMask < 8)
+         {
+            AddResult(
+               m_interactionState[
+                  m_position.InteractionMask],
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC1 ||
+            m_position.CandidateC3)
+         {
+            AddResult(
+               m_c1OrC3,
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC1 &&
+            m_position.CandidateC3)
+         {
+            AddResult(
+               m_c1AndC3,
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC1 &&
+            m_position.CandidateC2)
+         {
+            AddResult(
+               m_c1AndC2,
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC2 &&
+            m_position.CandidateC3)
+         {
+            AddResult(
+               m_c2AndC3,
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
+
+         if(m_position.CandidateC1 ||
+            m_position.CandidateC2 ||
+            m_position.CandidateC3)
+         {
+            AddResult(
+               m_anyCandidate,
+               win,
+               resultR,
+               barsElapsed
+            );
+         }
       }
 
       if(m_position.Hour >= 0 &&
@@ -2121,6 +2403,76 @@ private:
    }
 
    //==============================================================
+   // Sprint 9B frozen candidate classification
+   //
+   // IMPORTANT:
+   // These thresholds were declared BEFORE interaction results are
+   // observed. They are diagnostics only; H2 remains unchanged.
+   //
+   // Bit mask:
+   //   bit 0 = C1
+   //   bit 1 = C2
+   //   bit 2 = C3
+   //
+   // States:
+   //   0 NONE
+   //   1 C1_ONLY
+   //   2 C2_ONLY
+   //   3 C1_C2
+   //   4 C3_ONLY
+   //   5 C1_C3
+   //   6 C2_C3
+   //   7 C1_C2_C3
+   //==============================================================
+   void ClassifyFrozenCandidates()
+   {
+      m_position.CandidateC1 =
+         false;
+
+      m_position.CandidateC2 =
+         false;
+
+      m_position.CandidateC3 =
+         false;
+
+      m_position.InteractionMask =
+         0;
+
+      if(!m_position.ResearchFeaturesValid)
+         return;
+
+      m_position.CandidateC1 =
+         (
+            m_position.DirectionalER10 >=
+            0.50
+         );
+
+      m_position.CandidateC2 =
+         (
+            m_position.RelativeVolume20 >=
+            1.50
+         );
+
+      m_position.CandidateC3 =
+         (
+            m_position.VolumeZScore20 >=
+            0.25
+            &&
+            m_position.VolumeZScore20 <
+            1.00
+         );
+
+      if(m_position.CandidateC1)
+         m_position.InteractionMask += 1;
+
+      if(m_position.CandidateC2)
+         m_position.InteractionMask += 2;
+
+      if(m_position.CandidateC3)
+         m_position.InteractionMask += 4;
+   }
+
+   //==============================================================
    // Current R
    //==============================================================
    double CurrentR(
@@ -2516,6 +2868,18 @@ private:
       m_position.DirectionalER20 =
          0.0;
 
+      m_position.CandidateC1 =
+         false;
+
+      m_position.CandidateC2 =
+         false;
+
+      m_position.CandidateC3 =
+         false;
+
+      m_position.InteractionMask =
+         0;
+
       m_position.Hour =
          -1;
 
@@ -2712,6 +3076,44 @@ private:
             m_volumeZScore20Bucket[i]
          );
       }
+
+      for(int i = 0;
+          i < 3;
+          i++)
+      {
+         ResetStats(
+            m_candidate[i]
+         );
+      }
+
+      for(int i = 0;
+          i < 8;
+          i++)
+      {
+         ResetStats(
+            m_interactionState[i]
+         );
+      }
+
+      ResetStats(
+         m_c1OrC3
+      );
+
+      ResetStats(
+         m_c1AndC3
+      );
+
+      ResetStats(
+         m_c1AndC2
+      );
+
+      ResetStats(
+         m_c2AndC3
+      );
+
+      ResetStats(
+         m_anyCandidate
+      );
 
       for(int i = 0;
           i < 24;
