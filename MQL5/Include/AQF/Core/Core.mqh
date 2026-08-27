@@ -11,6 +11,7 @@
 #include "../Statistics/CandidatePolicySimulator.mqh"
 #include "../Statistics/CostCapitalSimulator.mqh"
 #include "../Statistics/RegimeFailureDiagnostics.mqh"
+#include "../Statistics/H3CandidateSimulator.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -39,6 +40,7 @@ private:
    CAQFCandidatePolicySimulator m_candidatePolicySimulator;
    CAQFCostCapitalSimulator     m_costCapitalSimulator;
    CAQFRegimeFailureDiagnostics m_regimeFailureDiagnostics;
+   CAQFH3CandidateSimulator       m_h3CandidateSimulator;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -108,7 +110,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.9.3"
+         "Adaptive Quant Framework v0.9.4"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -206,6 +208,17 @@ if(!m_regimeFailureDiagnostics.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 9 Package C - Frozen H3 Independent Sequential Simulator
+//------------------------------------------------------------
+if(!m_h3CandidateSimulator.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "H3CandidateSimulator initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -284,6 +297,15 @@ m_costCapitalSimulator.Update(
 // MFE/MAE and the original TP/SL sequence remain synchronized.
 //------------------------------------------------------------
 m_regimeFailureDiagnostics.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Frozen H3 Independent Sequential Simulator
+//
+// Evaluated on EVERY tick using its own virtual position.
+//------------------------------------------------------------
+m_h3CandidateSimulator.Update(
    m_snapshot,
    m_logger
 );
@@ -497,6 +519,11 @@ if(m_tradeBuildResult.Ready &&
       m_logger
    );
    m_regimeFailureDiagnostics.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_h3CandidateSimulator.Register(
       m_tradeRequest,
       m_snapshot,
       m_logger
@@ -735,6 +762,9 @@ m_costCapitalSimulator.Shutdown(
 // RegimeBucket lines are easy to locate after long backtests.
 //------------------------------------------------------------
 m_regimeFailureDiagnostics.Shutdown(
+   m_logger
+);
+m_h3CandidateSimulator.Shutdown(
    m_logger
 );
 
