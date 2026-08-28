@@ -12,6 +12,8 @@
 #include "../Statistics/CostCapitalSimulator.mqh"
 #include "../Statistics/RegimeFailureDiagnostics.mqh"
 #include "../Statistics/H3CandidateSimulator.mqh"
+#include "../Statistics/H3PersistenceDiagnostics.mqh"
+#include "../Statistics/Stalled10ExitSimulator.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -41,6 +43,8 @@ private:
    CAQFCostCapitalSimulator     m_costCapitalSimulator;
    CAQFRegimeFailureDiagnostics m_regimeFailureDiagnostics;
    CAQFH3CandidateSimulator       m_h3CandidateSimulator;
+   CAQFH3PersistenceDiagnostics     m_h3PersistenceDiagnostics;
+   CAQFStalled10ExitSimulator       m_stalled10ExitSimulator;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -110,7 +114,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.9.4"
+         "Adaptive Quant Framework v0.10.2"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -219,6 +223,28 @@ if(!m_h3CandidateSimulator.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 10 Package A - H3 Trade Persistence & Failure Dynamics
+//------------------------------------------------------------
+if(!m_h3PersistenceDiagnostics.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "H3PersistenceDiagnostics initialization failed."
+   );
+   return false;
+}
+//------------------------------------------------------------
+// Sprint 10 Package B - H3 + predeclared D1 Stalled10 exit
+//------------------------------------------------------------
+if(!m_stalled10ExitSimulator.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "Stalled10ExitSimulator initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -306,6 +332,26 @@ m_regimeFailureDiagnostics.Update(
 // Evaluated on EVERY tick using its own virtual position.
 //------------------------------------------------------------
 m_h3CandidateSimulator.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Sprint 10A persistence observer
+//
+// Independent frozen-H3 re-simulation on EVERY tick.
+// OBSERVATIONAL ONLY.
+//------------------------------------------------------------
+m_h3PersistenceDiagnostics.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Sprint 10B independent Stalled10 sequential simulator
+//
+// Runs on EVERY tick. Early D1 exits may free its independent
+// virtual position before the frozen H3 baseline would.
+//------------------------------------------------------------
+m_stalled10ExitSimulator.Update(
    m_snapshot,
    m_logger
 );
@@ -524,6 +570,16 @@ if(m_tradeBuildResult.Ready &&
       m_logger
    );
    m_h3CandidateSimulator.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_h3PersistenceDiagnostics.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_stalled10ExitSimulator.Register(
       m_tradeRequest,
       m_snapshot,
       m_logger
@@ -765,6 +821,22 @@ m_regimeFailureDiagnostics.Shutdown(
    m_logger
 );
 m_h3CandidateSimulator.Shutdown(
+   m_logger
+);
+
+//------------------------------------------------------------
+// Sprint 10A diagnostics print after H3 so sync can be checked
+// directly against H3PolicyStats.
+//------------------------------------------------------------
+m_h3PersistenceDiagnostics.Shutdown(
+   m_logger
+);
+
+//------------------------------------------------------------
+// Sprint 10B dynamic-policy report printed after frozen-H3
+// synchronization and persistence diagnostics.
+//------------------------------------------------------------
+m_stalled10ExitSimulator.Shutdown(
    m_logger
 );
 
