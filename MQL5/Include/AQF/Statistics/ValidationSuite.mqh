@@ -9,10 +9,11 @@
 #include "RandomDirectionBenchmarkSimulator.mqh"
 #include "H3MatchedRandomDirectionBenchmarkSimulator.mqh"
 #include "H3PairedDirectionalRandomizationSimulator.mqh"
+#include "WalkForwardValidationSimulator.mqh"
 
 //+------------------------------------------------------------------+
 //| AQF Validation Suite                                             |
-//| Sprint 11 - Methodological Validation Layer                      |
+//| Sprint 11-12 - Methodological Validation Layer                      |
 //|                                                                  |
 //| Additional validation only. Existing AQF simulators remain       |
 //| untouched and continue running independently.                    |
@@ -26,6 +27,7 @@ private:
    CAQFRandomDirectionBenchmarkSimulator m_randomBenchmark;
    CAQFH3MatchedRandomDirectionBenchmarkSimulator m_h3MatchedRandomBenchmark;
    CAQFH3PairedDirectionalRandomizationSimulator m_h3PairedDirectionalRandomization;
+   CAQFWalkForwardValidationSimulator m_walkForward;
 
    bool m_initialized;
 
@@ -67,6 +69,12 @@ public:
          return false;
       }
 
+      if(!m_walkForward.Initialize(logger))
+      {
+         logger.Error("WalkForwardValidationSimulator initialization failed.");
+         return false;
+      }
+
       m_initialized = true;
 
       logger.Info(
@@ -102,6 +110,11 @@ public:
          market,
          logger
       );
+
+      m_walkForward.Update(
+         market,
+         logger
+      );
    }
 
    bool Register(
@@ -111,6 +124,14 @@ public:
    {
       if(!m_initialized)
          return false;
+
+      if(!m_walkForward.Register(
+            request,
+            market,
+            logger))
+      {
+         return false;
+      }
 
       datetime eventTime =
          request.SignalTime;
@@ -172,6 +193,7 @@ public:
       m_randomBenchmark.Shutdown(logger);
       m_h3MatchedRandomBenchmark.Shutdown(logger);
       m_h3PairedDirectionalRandomization.Shutdown(logger);
+      m_walkForward.Shutdown(logger);
 
       ReportComparison(
          AQF_VALIDATION_IN_SAMPLE,

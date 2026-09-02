@@ -116,7 +116,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.11.3"
+         "Adaptive Quant Framework v0.12.0"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -248,8 +248,9 @@ if(!m_stalled10ExitSimulator.Initialize(
    return false;
 }
 //------------------------------------------------------------
-// Sprint 11 - Methodological Validation Layer
-// Additional only. Existing simulators remain untouched.
+// Sprint 11-12 - Methodological Validation Layer
+// Includes retrospective anchored walk-forward diagnostics.
+// Additional only. Existing strategy logic remains untouched.
 //------------------------------------------------------------
 if(!m_validationSuite.Initialize(
       m_logger))
@@ -370,7 +371,7 @@ m_stalled10ExitSimulator.Update(
    m_logger
 );
 //------------------------------------------------------------
-// Sprint 11 validation layer - every tick
+// Sprint 11-12 validation layer - every tick
 //------------------------------------------------------------
 m_validationSuite.Update(
    m_snapshot,
@@ -867,7 +868,7 @@ m_stalled10ExitSimulator.Shutdown(
 );
 
 //------------------------------------------------------------
-// Sprint 11 validation reports
+// Sprint 11-12 validation reports
 //------------------------------------------------------------
 m_validationSuite.Shutdown(
    m_logger
