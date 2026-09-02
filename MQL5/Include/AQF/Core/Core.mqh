@@ -14,6 +14,7 @@
 #include "../Statistics/H3CandidateSimulator.mqh"
 #include "../Statistics/H3PersistenceDiagnostics.mqh"
 #include "../Statistics/Stalled10ExitSimulator.mqh"
+#include "../Statistics/ValidationSuite.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -45,6 +46,7 @@ private:
    CAQFH3CandidateSimulator       m_h3CandidateSimulator;
    CAQFH3PersistenceDiagnostics     m_h3PersistenceDiagnostics;
    CAQFStalled10ExitSimulator       m_stalled10ExitSimulator;
+   CAQFValidationSuite                m_validationSuite;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -114,7 +116,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.10.2"
+         "Adaptive Quant Framework v0.11.3"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -245,6 +247,18 @@ if(!m_stalled10ExitSimulator.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 11 - Methodological Validation Layer
+// Additional only. Existing simulators remain untouched.
+//------------------------------------------------------------
+if(!m_validationSuite.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "ValidationSuite initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -352,6 +366,13 @@ m_h3PersistenceDiagnostics.Update(
 // virtual position before the frozen H3 baseline would.
 //------------------------------------------------------------
 m_stalled10ExitSimulator.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Sprint 11 validation layer - every tick
+//------------------------------------------------------------
+m_validationSuite.Update(
    m_snapshot,
    m_logger
 );
@@ -580,6 +601,11 @@ if(m_tradeBuildResult.Ready &&
       m_logger
    );
    m_stalled10ExitSimulator.Register(
+      m_tradeRequest,
+      m_snapshot,
+      m_logger
+   );
+   m_validationSuite.Register(
       m_tradeRequest,
       m_snapshot,
       m_logger
@@ -837,6 +863,13 @@ m_h3PersistenceDiagnostics.Shutdown(
 // synchronization and persistence diagnostics.
 //------------------------------------------------------------
 m_stalled10ExitSimulator.Shutdown(
+   m_logger
+);
+
+//------------------------------------------------------------
+// Sprint 11 validation reports
+//------------------------------------------------------------
+m_validationSuite.Shutdown(
    m_logger
 );
 
