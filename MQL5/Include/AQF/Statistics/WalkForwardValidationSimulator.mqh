@@ -5,6 +5,7 @@
 #include "../Common/TradeRequest.mqh"
 #include "../Common/TradeSignal.mqh"
 #include "../Logger/Logger.mqh"
+#include "ValidationGate.mqh"
 
 #define AQF_WF_FOLD_COUNT   3
 #define AQF_WF_PHASE_COUNT  2
@@ -13,7 +14,7 @@
 
 //+------------------------------------------------------------------+
 //| Anchored Walk-Forward Validation                                 |
-//| AQF v0.12.0 - Sprint 12A                                        |
+//| AQF v0.12.1 - Sprint 12B                                        |
 //|                                                                  |
 //| PURPOSE                                                          |
 //| Evaluate temporal stability of the FROZEN policy chain without   |
@@ -99,6 +100,8 @@ class CAQFWalkForwardValidationSimulator
 {
 private:
 
+   CAQFValidationGate m_validationGate;
+
    SAQFWalkForwardPosition m_positions[AQF_WF_SLOT_COUNT][AQF_WF_POLICY_COUNT];
    SAQFWalkForwardStats    m_stats[AQF_WF_SLOT_COUNT][AQF_WF_POLICY_COUNT];
 
@@ -165,7 +168,7 @@ public:
          true;
 
       logger.Info(
-         "WalkForwardFramework | Version=v0.12.0 | Mode=ANCHORED_EXPANDING_RETROSPECTIVE | Folds=3 | TP=1.50R | SL=1.00R"
+         "WalkForwardFramework | Version=v0.12.1 | Mode=ANCHORED_EXPANDING_RETROSPECTIVE | Folds=3 | TP=1.50R | SL=1.00R"
       );
 
       logger.Info(
@@ -193,7 +196,11 @@ public:
       );
 
       logger.Warning(
-         "METHODOLOGY: v0.12.0 does not tune or select thresholds. It only measures temporal stability of the frozen policy chain."
+         "METHODOLOGY: v0.12.1 does not tune or select thresholds. It measures temporal stability and applies a frozen rejection gate."
+      );
+
+      logger.Info(
+         "ValidationGateCriteria | Stage=WALK_FORWARD | RequiredTestFolds=3 | PositiveTestFoldsRequired=3 | AggregateExpectancy_GT_0=YES | AggregatePF_GT_1=YES | AggregateCumR_GT_0=YES | WorstFoldExpectancy_GE_0=YES | MinResolvedTradesPerTestFold=30"
       );
 
       return true;
@@ -407,6 +414,10 @@ public:
       );
 
       ReportTestAggregate(
+         logger
+      );
+
+      ReportValidationGate(
          logger
       );
 
@@ -1440,6 +1451,101 @@ private:
                worstFoldDD,
                2) +
             "R"
+         );
+      }
+   }
+
+
+   //==============================================================
+   // Frozen walk-forward promotion gate
+   //==============================================================
+   void ReportValidationGate(
+      CAQFLogger &logger)
+   {
+      for(int policy=0; policy<AQF_WF_POLICY_COUNT; policy++)
+      {
+         int foldsWithTrades=0;
+         int positiveFolds=0;
+         int minResolvedTrades=0;
+         long totalResolved=0;
+         double totalR=0.0;
+         double totalGrossProfit=0.0;
+         double totalGrossLoss=0.0;
+         double worstFoldExp=0.0;
+         bool first=true;
+
+         for(int fold=0; fold<AQF_WF_FOLD_COUNT; fold++)
+         {
+            int slot=SlotIndex(fold,AQF_WF_TEST);
+            SAQFWalkForwardStats s=m_stats[slot][policy];
+            long n=Resolved(s);
+            if(n<=0) continue;
+
+            double exp=Expectancy(s);
+            foldsWithTrades++;
+            if(exp>0.0) positiveFolds++;
+            totalResolved+=n;
+            totalR+=s.CumulativeR;
+            totalGrossProfit+=s.GrossProfitR;
+            totalGrossLoss+=s.GrossLossR;
+
+            if(first)
+            {
+               minResolvedTrades=(int)n;
+               worstFoldExp=exp;
+               first=false;
+            }
+            else
+            {
+               if(n<minResolvedTrades) minResolvedTrades=(int)n;
+               if(exp<worstFoldExp) worstFoldExp=exp;
+            }
+         }
+
+         double aggregateExp=(totalResolved>0 ? totalR/(double)totalResolved : 0.0);
+         double aggregatePF=0.0;
+         string aggregatePFText="0.000";
+
+         if(totalGrossLoss<=0.0)
+         {
+            if(totalGrossProfit>0.0)
+            {
+               aggregatePF=DBL_MAX;
+               aggregatePFText="INF";
+            }
+         }
+         else
+         {
+            aggregatePF=totalGrossProfit/totalGrossLoss;
+            aggregatePFText=DoubleToString(aggregatePF,3);
+         }
+
+         SAQFValidationGateResult r=m_validationGate.EvaluateWalkForward(
+            foldsWithTrades,
+            positiveFolds,
+            minResolvedTrades,
+            aggregateExp,
+            aggregatePF,
+            totalR,
+            worstFoldExp
+         );
+
+         logger.Info(
+            "ValidationGate"+
+            " | Stage=WALK_FORWARD"+
+            " | Policy="+PolicyText((ENUM_AQF_WF_POLICY)policy)+
+            " | Result="+m_validationGate.ResultText(r)+
+            " | Promotion="+m_validationGate.PromotionText(r)+
+            " | PassedRules="+IntegerToString(r.PassedRules)+"/7"+
+            " | FailedRules="+IntegerToString(r.FailedRules)+
+            " | TestFoldsWithTrades="+IntegerToString(foldsWithTrades)+"/3"+
+            " | PositiveTestFolds="+IntegerToString(positiveFolds)+"/3"+
+            " | MinResolvedTradesAnyTestFold="+IntegerToString(minResolvedTrades)+
+            " | AggregateExpectancy="+DoubleToString(aggregateExp,3)+"R"+
+            " | AggregatePF="+aggregatePFText+
+            " | AggregateCumR="+DoubleToString(totalR,2)+"R"+
+            " | WorstFoldExpectancy="+DoubleToString(worstFoldExp,3)+"R"+
+            " | FailReasons="+m_validationGate.FailReasons(r)
          );
       }
    }
