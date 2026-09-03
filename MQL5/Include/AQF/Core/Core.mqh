@@ -15,6 +15,7 @@
 #include "../Statistics/H3PersistenceDiagnostics.mqh"
 #include "../Statistics/Stalled10ExitSimulator.mqh"
 #include "../Statistics/ValidationSuite.mqh"
+#include "../Statistics/BreakoutExpansionResearchSimulator.mqh"
 #include "../Common/MarketSnapshot.mqh"
 #include "../Common/MarketRegime.mqh"
 #include "../Common/TradeSignal.mqh"
@@ -47,6 +48,7 @@ private:
    CAQFH3PersistenceDiagnostics     m_h3PersistenceDiagnostics;
    CAQFStalled10ExitSimulator       m_stalled10ExitSimulator;
    CAQFValidationSuite                m_validationSuite;
+   CAQFBreakoutExpansionResearchSimulator m_breakoutExpansionResearch;
    CAQFMarketSnapshot         m_snapshot;
    CAQFTradeSignal            m_signal;
    CAQFSignalValidationResult m_validation;
@@ -116,7 +118,7 @@ public:
          "=============================================="
       );
       m_logger.Info(
-         "Adaptive Quant Framework v0.12.1"
+         "Adaptive Quant Framework v0.13.0"
       );
       m_logger.Info(
          "Execution Gateway - HARD LOCKED"
@@ -260,6 +262,20 @@ if(!m_validationSuite.Initialize(
    );
    return false;
 }
+//------------------------------------------------------------
+// Sprint 13A - Research Reset: independent breakout candidate
+//
+// B1 rules are predeclared and frozen before viewing results.
+// Research only. Execution remains physically disabled.
+//------------------------------------------------------------
+if(!m_breakoutExpansionResearch.Initialize(
+      m_logger))
+{
+   m_logger.Error(
+      "BreakoutExpansionResearchSimulator initialization failed."
+   );
+   return false;
+}
       //------------------------------------------------------------
       // Development test warning
       //------------------------------------------------------------
@@ -374,6 +390,16 @@ m_stalled10ExitSimulator.Update(
 // Sprint 11-12 validation layer - every tick
 //------------------------------------------------------------
 m_validationSuite.Update(
+   m_snapshot,
+   m_logger
+);
+//------------------------------------------------------------
+// Sprint 13A independent breakout / expansion research candidate.
+//
+// Evaluates virtual exits every tick and new entries only once per
+// new candle. It does NOT depend on StrategyEngine opportunities.
+//------------------------------------------------------------
+m_breakoutExpansionResearch.Update(
    m_snapshot,
    m_logger
 );
@@ -871,6 +897,12 @@ m_stalled10ExitSimulator.Shutdown(
 // Sprint 11-12 validation reports
 //------------------------------------------------------------
 m_validationSuite.Shutdown(
+   m_logger
+);
+//------------------------------------------------------------
+// Sprint 13A frozen research-candidate report
+//------------------------------------------------------------
+m_breakoutExpansionResearch.Shutdown(
    m_logger
 );
 
